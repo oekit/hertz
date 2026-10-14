@@ -3,11 +3,11 @@ package hertz
 import (
 	"context"
 
-	"github.com/yi-nology/ekit-registry/registry/sdbridge"
+	"github.com/cloudwego/hertz/pkg/app/client/discovery"
+	registryhertz "github.com/yi-nology/ekit-hertz/registry/hertz"
 	nnsclient "github.com/yi-nology/ekit-nns/nns/client"
 	"github.com/yi-nology/ekit-registry/registry"
-	registryhertz "github.com/yi-nology/ekit-hertz/registry/hertz"
-	"github.com/cloudwego/hertz/pkg/app/client/discovery"
+	"github.com/yi-nology/ekit-registry/registry/sdbridge"
 )
 
 const resolverName = "nns-hertz"

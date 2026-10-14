@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	registrymocks "github.com/yi-nology/ekit-registry/registrymocks"
-	"github.com/yi-nology/ekit-registry/registry"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
+	"github.com/yi-nology/ekit-registry/registry"
+	registrymocks "github.com/yi-nology/ekit-registry/registrymocks"
 )
 
 func TestNewInstanceWatcher_PanicsOnNilDiscoverer(t *testing.T) {

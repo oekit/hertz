@@ -4,8 +4,8 @@ import (
 	"context"
 	"runtime/debug"
 
-	"github.com/yi-nology/ekit-observability/observability/logx"
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/yi-nology/ekit-observability/observability/logx"
 )
 
 // recoveryLog 带 component 属性的 scoped logger（同 failLog）。

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	registrymocks "github.com/yi-nology/ekit-registry/registrymocks"
-	"github.com/yi-nology/ekit-registry/registry"
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
+	"github.com/yi-nology/ekit-registry/registry"
+	registrymocks "github.com/yi-nology/ekit-registry/registrymocks"
 )
 
 func TestNewRegistry(t *testing.T) {

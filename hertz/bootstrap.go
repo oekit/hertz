@@ -4,9 +4,9 @@ import (
 	"context"
 	"runtime/debug"
 
+	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/yi-nology/ekit-core/lifecycle"
 	"github.com/yi-nology/ekit-observability/observability/logx"
-	"github.com/cloudwego/hertz/pkg/app/server"
 )
 
 var bootstrapLog = logx.Delegating("hertz-bootstrap")

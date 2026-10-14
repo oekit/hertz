@@ -3,8 +3,8 @@ package validatorh
 import (
 	"strconv"
 
-	"github.com/yi-nology/ekit-core/pkg/pagination"
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/yi-nology/ekit-core/pkg/pagination"
 )
 
 // BindPage 从 Hertz RequestContext 绑定分页参数。

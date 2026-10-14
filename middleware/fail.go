@@ -5,10 +5,10 @@ import (
 	stderrors "errors"
 	"sync/atomic"
 
-	"github.com/yi-nology/ekit-observability/observability/logx"
-	ekiterrors "github.com/yi-nology/ekit-core/pkg/errors"
-	"github.com/yi-nology/ekit-registry/registry"
 	"github.com/cloudwego/hertz/pkg/app"
+	ekiterrors "github.com/yi-nology/ekit-core/pkg/errors"
+	"github.com/yi-nology/ekit-observability/observability/logx"
+	"github.com/yi-nology/ekit-registry/registry"
 )
 
 // NotFoundErrChecker 是可注入的"资源未找到"错误检查函数。

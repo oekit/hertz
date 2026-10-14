@@ -6,10 +6,10 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/yi-nology/ekit-hertz/middleware/traceid/hmw"
-	"github.com/yi-nology/ekit-core/pkg/errors"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/yi-nology/ekit-core/pkg/errors"
+	"github.com/yi-nology/ekit-hertz/middleware/traceid/hmw"
 )
 
 // Response 是所有 HTTP API 的统一响应结构。

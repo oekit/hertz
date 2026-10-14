@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yi-nology/ekit-registry/registry/sdbridge"
-	nnsclient "github.com/yi-nology/ekit-nns/nns/client"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
+	nnsclient "github.com/yi-nology/ekit-nns/nns/client"
+	"github.com/yi-nology/ekit-registry/registry/sdbridge"
 )
 
 // nnsRegistry 包装 nns ServiceClient，实现 Hertz server/registry.Registry。

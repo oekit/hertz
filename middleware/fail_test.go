@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	ekiterrors "github.com/yi-nology/ekit-core/pkg/errors"
 	"github.com/yi-nology/ekit-registry/registry"
-	"github.com/cloudwego/hertz/pkg/app"
 )
 
 // TestFail_BizError 验证 Fail 函数 3-tier 第 1 层: BizError 提取.

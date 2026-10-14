@@ -6,10 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yi-nology/ekit-observability/observability/logx"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/golang-jwt/jwt/v4"
 	jwthertz "github.com/hertz-contrib/jwt"
+	"github.com/yi-nology/ekit-observability/observability/logx"
 )
 
 const (

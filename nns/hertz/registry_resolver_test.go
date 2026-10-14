@@ -6,10 +6,10 @@ import (
 	"net"
 	"testing"
 
-	nacospkg "github.com/yi-nology/ekit-registry/nacos"
-	"github.com/yi-nology/ekit-nns/nns"
-	"github.com/yi-nology/ekit-registry/registry"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
+	"github.com/yi-nology/ekit-nns/nns"
+	nacospkg "github.com/yi-nology/ekit-registry/nacos"
+	"github.com/yi-nology/ekit-registry/registry"
 )
 
 // TestNewRegistry_NilRegistrar_OK 验证 mock 模式下 Register/Deregister 不报错（静默跳过）。

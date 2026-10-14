@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/yi-nology/ekit-core/version"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
+	"github.com/yi-nology/ekit-core/version"
 )
 
 func TestHandler_Response(t *testing.T) {

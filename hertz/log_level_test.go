@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/yi-nology/ekit-observability/observability/logx"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/yi-nology/ekit-observability/observability/logx"
 )
 
 // recordingLogger 记录 SetLevel 调用，用于断言 hlog → logx 级别映射。

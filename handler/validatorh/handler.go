@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yi-nology/ekit-core/pkg/validator"
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/yi-nology/ekit-core/pkg/validator"
 )
 
 // BindQuery 绑定 query 参数并验证。

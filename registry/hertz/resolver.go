@@ -3,9 +3,9 @@ package hertz
 import (
 	"context"
 
-	"github.com/yi-nology/ekit-registry/registry/sdbridge"
-	"github.com/yi-nology/ekit-registry/registry"
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
+	"github.com/yi-nology/ekit-registry/registry"
+	"github.com/yi-nology/ekit-registry/registry/sdbridge"
 )
 
 const resolverName = "ekit"

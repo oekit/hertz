@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/yi-nology/ekit-observability/observability/logx"
-	"github.com/yi-nology/ekit-core/pkg/pathx"
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/yi-nology/ekit-core/pkg/pathx"
+	"github.com/yi-nology/ekit-observability/observability/logx"
 )
 
 // AccessLogOptions 是访问日志中间件的配置。

@@ -10,12 +10,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/route"
+	"github.com/yi-nology/ekit-core/pkg/errors"
 	"github.com/yi-nology/ekit-data/data/crud"
 	"github.com/yi-nology/ekit-hertz/handler/validatorh"
 	mw "github.com/yi-nology/ekit-hertz/middleware"
-	"github.com/yi-nology/ekit-core/pkg/errors"
-	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/cloudwego/hertz/pkg/route"
 )
 
 // sortColumnRe 严格匹配 SQL 标识符（字母/下划线开头，仅字母数字下划线）。

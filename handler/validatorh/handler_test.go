@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/yi-nology/ekit-core/pkg/validator"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	"github.com/yi-nology/ekit-core/pkg/validator"
 )
 
 type queryForm struct {
