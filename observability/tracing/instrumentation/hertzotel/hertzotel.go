@@ -13,7 +13,7 @@
 //
 // 集成方式:
 //
-//	import "github.com/yi-nology/ekit-observability/observability/tracing"
+//	import "github.com/yi-nology/ekit-tracing"
 //	import hertzotel "github.com/yi-nology/ekit-hertz/observability/tracing/instrumentation/hertzotel"
 //
 //	func main() {

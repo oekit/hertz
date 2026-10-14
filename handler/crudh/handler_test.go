@@ -14,7 +14,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/cloudwego/hertz/pkg/route/param"
 	bizerrors "github.com/yi-nology/ekit-core/pkg/errors"
-	"github.com/yi-nology/ekit-data/data/crud"
+	"github.com/yi-nology/ekit-gorm/crud"
 )
 
 // --- Test domain types ---

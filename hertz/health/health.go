@@ -44,10 +44,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/yi-nology/ekit-core/concurrency/async"
+	"github.com/yi-nology/ekit-concurrency/async"
 	"github.com/yi-nology/ekit-core/version"
-	"github.com/yi-nology/ekit-observability/middleware/traceid"
-	"github.com/yi-nology/ekit-observability/observability/logx"
+	"github.com/yi-nology/ekit-tracing/traceid"
+	"github.com/yi-nology/ekit-logx"
 )
 
 // HealthChecker 健康检查函数类型。

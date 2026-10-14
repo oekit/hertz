@@ -13,9 +13,9 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/yi-nology/ekit-core/pkg/errors"
-	"github.com/yi-nology/ekit-data/data/crud"
+	"github.com/yi-nology/ekit-gorm/crud"
 	"github.com/yi-nology/ekit-hertz/handler/validatorh"
-	mw "github.com/yi-nology/ekit-hertz/middleware"
+	mw "github.com/yi-nology/ekit-middleware/middleware"
 )
 
 // sortColumnRe 严格匹配 SQL 标识符（字母/下划线开头，仅字母数字下划线）。

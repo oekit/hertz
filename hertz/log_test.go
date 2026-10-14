@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
-	"github.com/yi-nology/ekit-observability/observability/logx"
-	logxhlog "github.com/yi-nology/ekit-observability/observability/logx/hlog"
+	"github.com/yi-nology/ekit-logx"
+	logxhlog "github.com/yi-nology/ekit-logx/hlog"
 )
 
 func TestNewLogger_ImplementsFullLogger(t *testing.T) {

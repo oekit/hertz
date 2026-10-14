@@ -15,10 +15,10 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
 	"github.com/yi-nology/ekit-bootstrap/bootstrap"
-	"github.com/yi-nology/ekit-core/concurrency/async"
+	"github.com/yi-nology/ekit-concurrency/async"
 	"github.com/yi-nology/ekit-core/lifecycle"
-	"github.com/yi-nology/ekit-observability/observability/logx"
-	"github.com/yi-nology/ekit-observability/shutdown"
+	"github.com/yi-nology/ekit-logx"
+	"github.com/yi-nology/ekit-logx/shutdown"
 )
 
 func TestRunServer_RegistersShutdownHook(t *testing.T) {

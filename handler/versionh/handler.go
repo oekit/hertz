@@ -12,7 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/yi-nology/ekit-core/version"
-	"github.com/yi-nology/ekit-observability/middleware/traceid"
+	"github.com/yi-nology/ekit-tracing/traceid"
 )
 
 // BuildVersionResp 版本信息响应结构，用于 /buildVersion 端点。

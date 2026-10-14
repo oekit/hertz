@@ -7,8 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yi-nology/ekit-core/concurrency/async"
-	"github.com/yi-nology/ekit-observability/observability/logx"
+	"github.com/yi-nology/ekit-concurrency/async"
+	"github.com/yi-nology/ekit-logx"
 	"github.com/yi-nology/ekit-registry/registry"
 )
 

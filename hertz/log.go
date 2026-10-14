@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
-	"github.com/yi-nology/ekit-observability/observability/logx"
+	"github.com/yi-nology/ekit-logx"
 )
 
 // hlogAdapter 将 ekit logx.Logger 适配为 Hertz hlog.FullLogger。
