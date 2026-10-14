@@ -13,10 +13,8 @@ require (
 	github.com/yi-nology/ekit-bootstrap v0.2.1
 	github.com/yi-nology/ekit-concurrency v0.1.0
 	github.com/yi-nology/ekit-core v0.2.0
-	github.com/yi-nology/ekit-gorm v0.1.0
 	github.com/yi-nology/ekit-logx v0.1.1
 	github.com/yi-nology/ekit-metrics v0.1.0
-	github.com/yi-nology/ekit-middleware v0.1.1
 	github.com/yi-nology/ekit-nns v0.2.1
 	github.com/yi-nology/ekit-registry v0.2.0
 	github.com/yi-nology/ekit-tracing v0.1.0
@@ -57,21 +55,16 @@ require (
 	github.com/cloudwego/netpoll v0.7.5 // indirect
 	github.com/deckarep/golang-set v1.7.1 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
-	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/go-playground/locales v0.14.1 // indirect
-	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.30.3 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
-	github.com/hertz-contrib/requestid v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.0.0-20180206201540-c2b33e8439af // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
+	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
-	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect

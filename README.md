@@ -1,6 +1,6 @@
 # ekit-hertz
 
-> Hertz 运行时集成——日志桥接、生命周期、SSE/health/metrics 子包、handler、注册发现与 NNS 适配器、OTel 桥接。
+> Hertz 运行时集成——日志桥接、生命周期、SSE/health/metrics 子包、注册发现与 NNS 适配器、OTel 桥接。
 
 本仓库是 [ekit](https://git.enjoye.top/enjoydream/ekit)（`git.enjoye.top/enjoydream/ekit` v0.34.0）
 拆分出的独立 Go module，属于 **yi-nology** ekit 子项目矩阵（Round-2 深拆粒度）。
@@ -8,7 +8,7 @@
 ## 安装
 
 ```bash
-go get github.com/yi-nology/ekit-hertz@v0.2.0
+go get github.com/yi-nology/ekit-hertz@v0.3.0
 ```
 
 ## 包清单
@@ -19,7 +19,7 @@ go get github.com/yi-nology/ekit-hertz@v0.2.0
 - \`governance/hertz/\` — 动态限流/超时中间件
 - \`observability/tracing/instrumentation/hertzotel|hertztracer/\` — OTel / OpenTracing 桥接
 
-> 自研标准中间件栈与 contrib 桥接已迁 [ekit-middleware](https://github.com/yi-nology/ekit-middleware)。
+> 自研标准中间件栈与 contrib 桥接已迁 [ekit-middleware](https://github.com/yi-nology/ekit-middleware)；handler 层（crudh/validatorh/versionh）已迁 [ekit-handler](https://github.com/yi-nology/ekit-handler)——本仓库因此**不再依赖 GORM 与 middleware 栈**。
 
 ## 依赖关系
 
@@ -40,15 +40,17 @@ ekit-istio           Istio Proxyless                                    （零�
       ekit-nns       服务治理客户端                           → httpx, registry, core, logx, tracing, metrics
         ekit-bootstrap 应用引导
     ekit-middleware  Hertz 中间件栈                           → core, concurrency, logx, metrics, tracing, registry
-    ekit-hertz       Hertz 运行时/适配/instrumentation        → middleware, gorm, nns, registry, metrics, tracing, logx, core
-    ekit-kitex       Kitex 生态                               → nns, registry, core, concurrency, logx, metrics
+    ekit-handler     HTTP handler 层（CRUD/绑定/版本）        → middleware, gorm, core, tracing
+    ekit-hertz       Hertz 运行时/适配/instrumentation        → nns, registry, metrics, tracing, logx, core, concurrency
+    ekit-kitex       Kitex 生态                               → nns, registry, core, concurrency, logx, metrics, tracing
   ekit-workflow      流程编排                                 → concurrency, logx
+ekit-kitex-examples  Kitex 示例（echo client/server）         → kitex, bootstrap, registry, logx, tracing
 ```
 
 > 注：`ekit-observability` 已在 Round-2 深拆中解散——logx 迁 [ekit-logx]、metrics 迁 [ekit-metrics]、
 > tracing/traceid 迁 [ekit-tracing]、shutdown 迁 [ekit-logx]；原仓库已归档。
 
-依赖：[ekit-middleware](https://github.com/yi-nology/ekit-middleware)、[ekit-gorm](https://github.com/yi-nology/ekit-gorm)（crudh）、[ekit-nns](https://github.com/yi-nology/ekit-nns)、[ekit-registry](https://github.com/yi-nology/ekit-registry)、[ekit-metrics](https://github.com/yi-nology/ekit-metrics)、[ekit-tracing](https://github.com/yi-nology/ekit-tracing)、[ekit-logx](https://github.com/yi-nology/ekit-logx)、[ekit-core](https://github.com/yi-nology/ekit-core)。
+依赖：[ekit-nns](https://github.com/yi-nology/ekit-nns)、[ekit-registry](https://github.com/yi-nology/ekit-registry)、[ekit-metrics](https://github.com/yi-nology/ekit-metrics)、[ekit-tracing](https://github.com/yi-nology/ekit-tracing)、[ekit-logx](https://github.com/yi-nology/ekit-logx)、[ekit-core](https://github.com/yi-nology/ekit-core)。
 
 ## 与 ekit 单体仓库的关系
 
