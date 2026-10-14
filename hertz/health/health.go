@@ -46,8 +46,8 @@ import (
 
 	"github.com/yi-nology/ekit-concurrency/async"
 	"github.com/yi-nology/ekit-core/version"
-	"github.com/yi-nology/ekit-tracing/traceid"
 	"github.com/yi-nology/ekit-logx"
+	"github.com/yi-nology/ekit-tracing/traceid"
 )
 
 // HealthChecker 健康检查函数类型。
