@@ -17,7 +17,8 @@
 //	hlog.SetSilentMode(true) // 静默客户端不规范行为导致的读头错误日志（推荐生产开启）
 //	hlog.SetLogger(hertz.NewLogger(logx.NewSlogLogger("my-http")))
 //
-//	bootstrap.Run(cfg, func(app *bootstrap.App) error {
+//	b, _ := bootstrap.New(bootstrap.WithServiceName("svc")) // + nacos/obs WithXxx 按需注入
+//	b.Run(func(app *bootstrap.App) error {
 //	    tracing := hertzotel.NewServerTracing()
 //	    h := server.New(
 //	        server.WithHostPorts(":8080"),

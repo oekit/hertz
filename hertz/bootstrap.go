@@ -49,7 +49,8 @@ const errEngineNotRunning = "engine is not running"
 //
 // 使用方式（在 bootstrap.Run 的 userFn 内，对称 kitex.RunServer）：
 //
-//	bootstrap.Run(cfg, func(app *bootstrap.App) error {
+//	b, _ := bootstrap.New(bootstrap.WithServiceName("svc")) // + nacos/obs WithXxx 按需注入
+//	b.Run(func(app *bootstrap.App) error {
 //	    h := server.New(server.WithHostPorts(":8080"))
 //	    h.Use(mw.DefaultMiddleware(mw.StackConfig{ServiceName: "my-svc"})...)
 //	    hertz.RunServer(app, "hertz", h)
