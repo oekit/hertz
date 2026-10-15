@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
-	"github.com/yi-nology/ekit-registry/registry"
-	"github.com/yi-nology/ekit-registry/registry/sdbridge"
+	"github.com/oekit/registry/registry"
+	"github.com/oekit/registry/registry/sdbridge"
 )
 
 // hertzRegistry 将 ekit [registry.Registrar] 适配为 Hertz [registry.Registry]。

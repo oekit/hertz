@@ -5,7 +5,7 @@ import (
 	"strconv"
 
 	hdiscovery "github.com/cloudwego/hertz/pkg/app/client/discovery"
-	"github.com/yi-nology/ekit-registry/registry"
+	"github.com/oekit/registry/registry"
 )
 
 // InstancesToHertz 将 ekit [registry.Instance] 列表转换为 Hertz [hdiscovery.Instance] 列表。

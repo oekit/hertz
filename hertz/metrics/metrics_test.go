@@ -7,7 +7,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"github.com/yi-nology/ekit-metrics"
+	"github.com/oekit/metrics"
 )
 
 func TestMetricsHandler_GzipNegotiation(t *testing.T) {

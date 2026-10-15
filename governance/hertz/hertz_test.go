@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 
-	"github.com/yi-nology/ekit-core/governance"
+	"github.com/oekit/core/governance"
 )
 
 // TestLimiterMiddleware_DynamicPolicy 行为级:无配置放行 → 配置限流后超限 429

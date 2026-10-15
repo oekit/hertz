@@ -13,8 +13,8 @@
 //
 // 集成方式:
 //
-//	import "github.com/yi-nology/ekit-tracing"
-//	import hertzotel "github.com/yi-nology/ekit-hertz/observability/tracing/instrumentation/hertzotel"
+//	import "github.com/oekit/tracing"
+//	import hertzotel "github.com/oekit/hertz/observability/tracing/instrumentation/hertzotel"
 //
 //	func main() {
 //	    // 1. 初始化全局 OTel tracer + propagator

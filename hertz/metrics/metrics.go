@@ -10,7 +10,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/yi-nology/ekit-metrics"
+	"github.com/oekit/metrics"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"

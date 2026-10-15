@@ -11,7 +11,7 @@
 //	import (
 //	    opentracing "github.com/opentracing/opentracing-go"
 //	    jaegercfg "github.com/uber/jaeger-client-go/config"
-//	    hertztracer "github.com/yi-nology/ekit-hertz/observability/tracing/instrumentation/hertztracer"
+//	    hertztracer "github.com/oekit/hertz/observability/tracing/instrumentation/hertztracer"
 //	)
 //
 //	// 1. 初始化 opentracing 全局 Tracer

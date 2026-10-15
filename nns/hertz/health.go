@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/yi-nology/ekit-concurrency/async"
-	"github.com/yi-nology/ekit-logx"
-	"github.com/yi-nology/ekit-registry/registry"
+	"github.com/oekit/concurrency/async"
+	"github.com/oekit/logx"
+	"github.com/oekit/registry/registry"
 )
 
 var healthLog = logx.Delegating("nns-hertz")

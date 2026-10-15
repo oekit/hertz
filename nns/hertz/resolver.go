@@ -4,10 +4,10 @@ import (
 	"context"
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
-	registryhertz "github.com/yi-nology/ekit-hertz/registry/hertz"
-	nnsclient "github.com/yi-nology/ekit-nns/nns/client"
-	"github.com/yi-nology/ekit-registry/registry"
-	"github.com/yi-nology/ekit-registry/registry/sdbridge"
+	registryhertz "github.com/oekit/hertz/registry/hertz"
+	nnsclient "github.com/oekit/nns/nns/client"
+	"github.com/oekit/registry/registry"
+	"github.com/oekit/registry/registry/sdbridge"
 )
 
 const resolverName = "nns-hertz"

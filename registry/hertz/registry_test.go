@@ -9,8 +9,8 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
-	"github.com/yi-nology/ekit-registry/registry"
-	registrymocks "github.com/yi-nology/ekit-registry/registrymocks"
+	"github.com/oekit/registry/registry"
+	registrymocks "github.com/oekit/registry/registrymocks"
 )
 
 func TestNewRegistry(t *testing.T) {

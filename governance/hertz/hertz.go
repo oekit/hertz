@@ -18,7 +18,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 
-	"github.com/yi-nology/ekit-core/governance"
+	"github.com/oekit/core/governance"
 )
 
 // bucket 是极简令牌桶(policy 变化时整体重建,不做原地扩缩)。

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
-	nnsclient "github.com/yi-nology/ekit-nns/nns/client"
-	registrymocks "github.com/yi-nology/ekit-registry/registrymocks"
+	nnsclient "github.com/oekit/nns/nns/client"
+	registrymocks "github.com/oekit/registry/registrymocks"
 )
 
 // TestNnsRegistry_DeregisterKeepsTagsAndWeight 钉住 nns/hertz Deregister

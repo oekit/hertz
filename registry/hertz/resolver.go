@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
-	"github.com/yi-nology/ekit-registry/registry"
-	"github.com/yi-nology/ekit-registry/registry/sdbridge"
+	"github.com/oekit/registry/registry"
+	"github.com/oekit/registry/registry/sdbridge"
 )
 
 const resolverName = "ekit"

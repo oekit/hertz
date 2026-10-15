@@ -13,7 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
-	"github.com/yi-nology/ekit-tracing/traceid"
+	"github.com/oekit/tracing/traceid"
 )
 
 // envelope 用于断言统一响应外壳 {code, data, message, trace_id}。
