@@ -52,7 +52,7 @@ const errEngineNotRunning = "engine is not running"
 //	b, _ := bootstrap.New(bootstrap.WithServiceName("svc")) // + nacos/obs WithXxx 按需注入
 //	b.Run(func(app *bootstrap.App) error {
 //	    h := server.New(server.WithHostPorts(":8080"))
-//	    h.Use(mw.DefaultMiddleware(mw.StackConfig{ServiceName: "my-svc"})...)
+//	    h.Use(mw.DefaultMiddleware(mw.StackConfig{})...)
 //	    hertz.RunServer(app, "hertz", h)
 //	    <-app.Context().Done() // 阻塞直到收到 SIGINT/SIGTERM
 //	    return nil

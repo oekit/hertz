@@ -26,7 +26,7 @@
 //	        tracing.Option,
 //	    )
 //	    h.Use(tracing.Middleware)
-//	    h.Use(mw.DefaultMiddleware(mw.StackConfig{ServiceName: "my-http"})...)
+//	    h.Use(mw.DefaultMiddleware(mw.StackConfig{SkipPaths: []string{"/healthz"}})...)
 //
 //	    // 健康检查 + 指标（在 RunServer 之前注册，确保端点随 server 一起就绪）
 //	    health.RegisterHealthRoutes(h, health.WithCheckers(
