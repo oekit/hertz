@@ -10,14 +10,14 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/yi-nology/ekit-bootstrap v0.2.2
-	github.com/yi-nology/ekit-concurrency v0.1.0
+	github.com/yi-nology/ekit-bootstrap v0.2.3
+	github.com/yi-nology/ekit-concurrency v0.1.1
 	github.com/yi-nology/ekit-core v0.3.0
-	github.com/yi-nology/ekit-logx v0.1.1
-	github.com/yi-nology/ekit-metrics v0.1.1
+	github.com/yi-nology/ekit-logx v0.1.4
+	github.com/yi-nology/ekit-metrics v0.1.2
 	github.com/yi-nology/ekit-nns v0.3.0
 	github.com/yi-nology/ekit-registry v0.2.2
-	github.com/yi-nology/ekit-tracing v0.1.1
+	github.com/yi-nology/ekit-tracing v0.1.2
 )
 
 require (
