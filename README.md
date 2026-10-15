@@ -14,19 +14,39 @@
 go get github.com/oekit/hertz@v0.3.4
 ```
 
-## 快速使用
+## 能做什么
 
+- **hlog 桥接**：框架日志 → logx，caller 指向真实调用方
+- **RunServer**：接 bootstrap 生命周期、优雅关闭、netpoll 监听失败自恢复
+- **Shutdown Hook**：关停前刷数据（接受 error，不 panic）
+- **SSE**：官方 protocol/sse 封装（Send/SendRaw/KeepAlive）
+- **health/metrics/render/adaptor** 子包齐全
+
+## 使用示例
+
+### 服务骨架
 ```go
 import (
     hertzserver "github.com/cloudwego/hertz/pkg/app/server"
     ekithertz "github.com/oekit/hertz/hertz"
 )
 
-h := hertzserver.New(hertzserver.WithHostPorts(":8080"))
-// ...中间件与路由
-ekithertz.RunServer(app, "my-service", h) // 优雅关闭
+h := hertzserver.New(hertzserver.WithHostPorts(":8080"),
+    hertzserver.WithExitWaitTime(5*time.Second))
+ekithertz.RunServer(app, "my-service", h)
 ```
+### SSE 流式推送
+```go
+import ekitsse "github.com/oekit/hertz/hertz/sse"
 
+h.GET("/stream", func(ctx context.Context, c *app.RequestContext) {
+    s := ekitsse.NewStream(c)
+    defer s.Close()
+    _ = s.Send("progress", map[string]any{"pct": 50})
+    _ = s.KeepAlive()
+})
+
+> ⚠️ **建议**：`hlog.SetSilentMode(true)` 屏蔽客户端异常断连噪音；`WithExitWaitTime` > 最大请求耗时，且 < K8s terminationGracePeriod。
 ## 包清单
 
 - \`hertz/\` — 运行时集成：日志桥接（hlog→logx）、RunServer 生命周期、Shutdown Hook；子包 adaptor/health/metrics/render/sse
