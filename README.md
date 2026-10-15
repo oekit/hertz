@@ -11,7 +11,7 @@
 ## 安装
 
 ```bash
-go get github.com/oekit/hertz@v0.3.4
+go get github.com/oekit/hertz@v0.3.5
 ```
 
 ## 能做什么
