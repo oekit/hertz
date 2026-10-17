@@ -4,6 +4,10 @@
 
 ## [v0.5.3] — 2026-10-17
 
+- fix(deps): 内部依赖地板全量对齐最新——bootstrap v0.5.1、concurrency v0.5.2、core v0.6.0、gormx v0.5.2、logx v0.5.0（hlog v0.1.1）、metrics v0.1.6、middleware v0.5.1、nns v0.3.4、pkg v0.9.3、registry v0.3.1、tracing v0.2.1；go 维持 1.26.0（tracing/OTel 生态传导）
+
+## [v0.5.4] — 2026-10-17
+
 - **fix(lint)**：`health_test.go` 循环内 `resp` 改复用外层声明（govet shadow）——
   v0.5.2 tag 曾因 CI 存量红被重指向 shadow 修复提交，导致 tag 树与
   sum.golang.org 首次记录的校验和不一致（默认 GOSUMDB 用户拉取报

@@ -6,17 +6,17 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/bootstrap v0.5.0
-	github.com/oekit/concurrency v0.3.0
-	github.com/oekit/core v0.3.3
-	github.com/oekit/gormx v0.5.1
-	github.com/oekit/logx v0.2.0
-	github.com/oekit/metrics v0.1.5
-	github.com/oekit/middleware v0.5.0
-	github.com/oekit/nns v0.3.3
-	github.com/oekit/pkg v0.1.3
-	github.com/oekit/registry v0.2.6
-	github.com/oekit/tracing v0.2.0
+	github.com/oekit/bootstrap v0.5.1
+	github.com/oekit/concurrency v0.5.2
+	github.com/oekit/core v0.6.0
+	github.com/oekit/gormx v0.5.2
+	github.com/oekit/logx v0.5.0
+	github.com/oekit/metrics v0.1.6
+	github.com/oekit/middleware v0.5.1
+	github.com/oekit/nns v0.3.4
+	github.com/oekit/pkg v0.9.3
+	github.com/oekit/registry v0.3.1
+	github.com/oekit/tracing v0.2.1
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -27,9 +27,11 @@ require (
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.27.0 // indirect
+	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/hertz-contrib/requestid v1.1.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
+	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
+	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
 
 require (
@@ -78,7 +80,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507 // indirect
-	github.com/oekit/logx/hlog v0.1.0
+	github.com/oekit/logx/hlog v0.1.1
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
@@ -91,10 +93,10 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel v1.46.0 // indirect
-	go.opentelemetry.io/otel/metric v1.46.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.46.0 // indirect
-	go.opentelemetry.io/otel/trace v1.46.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
+	go.opentelemetry.io/otel/metric v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
