@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.5.10] — 2026-10-17
+
+- bootstrap 地板 v0.5.2 → v0.5.3；nns 地板 v0.3.4 → v0.3.5
+
 ## [v0.5.9] — 2026-10-17
 
 - kitx 地板 v0.1.0 → v0.1.1
