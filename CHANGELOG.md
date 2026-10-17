@@ -10,6 +10,40 @@
   不在 `ctx.Response.Body()`（HijackWriter 直写 conn，godoc 已注明）
   （[#9](https://github.com/oekit/hertz/issues/9)）
 
+## [v0.5.10] — 2026-10-17
+
+- bootstrap 地板 v0.5.2 → v0.5.3；nns 地板 v0.3.4 → v0.3.5
+
+## [v0.5.9] — 2026-10-17
+
+- kitx 地板 v0.1.0 → v0.1.1
+
+## [v0.5.8] — 2026-10-17
+
+- pkg 地板 v0.11.0；concurrency v0.5.4、gormx v0.5.4、middleware v0.6.2 地板跟随
+
+## [v0.5.7] — 2026-10-17
+
+- fix(deps): 地板跟随——middleware v0.5.1 → v0.6.1、gormx v0.5.2 → v0.5.3、concurrency v0.5.2 → v0.5.3（pkg/kitx 已在 v0.10.0/v0.1.0）
+
+## [v0.5.6] — 2026-10-17
+
+- refactor(validatorh): 底层校验迁移至 [kitx](https://github.com/oekit/kitx)/validator（pkg v0.10.0 拆分承接）——import 机械替换，Bind*/Fail 400 错误映射行为不变；deps: pkg v0.9.3 → v0.10.0、新增 kitx v0.1.0
+
+## [v0.5.5] — 2026-10-17
+
+- fix(lifecycle): bootstrap_test 迁移 logx/shutdown → core/lifecycle（SA1019）；fix(deps): bootstrap 地板 v0.5.1 → v0.5.2
+
+## [v0.5.4] — 2026-10-17
+
+- **fix(lint)**：`health_test.go` 循环内 `resp` 改复用外层声明（govet shadow）——
+  v0.5.2 tag 曾因 CI 存量红被重指向 shadow 修复提交，导致 tag 树与
+  sum.golang.org 首次记录的校验和不一致（默认 GOSUMDB 用户拉取报
+  checksum mismatch，[#7](https://github.com/oekit/hertz/issues/7)）。
+  **处置**：v0.5.2 tag 已恢复至与 sumdb 记录一致的原提交；本 v0.5.3 包含
+  全部内容（deps 对齐 + shadow 修复），受影响用户请直接使用 v0.5.3，
+  或临时 `GOPRIVATE=github.com/oekit` 直连
+
 ## [v0.5.2] — 2026-10-17
 
 ### Fixed

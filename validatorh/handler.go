@@ -1,7 +1,7 @@
 // Package validatorh 提供基于 Hertz 的请求参数绑定与验证。
 //
 // 将 HTTP 框架绑定从 pkg/validator 分离，保持 pkg 层框架无关。
-// 底层验证逻辑（Validate/ValidationError）仍在 pkg/validator 中。
+// 底层验证逻辑（Validate/ValidationError）在 github.com/oekit/kitx/validator（自 pkg v0.10.0 拆出）。
 package validatorh
 
 import (
@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/oekit/pkg/validator"
+	"github.com/oekit/kitx/validator"
 )
 
 // BindQuery 绑定 query 参数并验证。

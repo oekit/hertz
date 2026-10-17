@@ -1,15 +1,10 @@
 # AGENTS.md — oekit/hertz
 
-> Hertz 运行时集成——hlog 桥接、RunServer 生命周期、Shutdown Hook + health/metrics/sse/render/adaptor + registry/nns 适配 + hertzotel/hertztracer + govhertz 治理中间件
-> 当前版本：`v0.5.1` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
+> Hertz 运行时集成——日志桥接、生命周期、SSE/health/metrics、适配器、OTel、crudh/validatorh/versionh（原 handler 微库收编）
+> 当前版本：`v0.5.4` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
-- `hertz`（模块根包，import `github.com/oekit/hertz`）— RunServer 生命周期 / hlog 桥接 / Shutdown Hook
-- `adaptor/`、`health/`（含 `health/redischeck/`）、`metrics/`、`render/`、`sse/`
-- `crudh/`、`validatorh/`、`versionh/` — 泛型 CRUD Handler / 参数绑定校验 / 版本端点
-- `governance/`（包名 govhertz）— 动态限流/超时中间件
-- `registry/`、`nns/` — 注册发现适配
-- `hertzotel/`、`hertztracer/` — OpenTelemetry / OpenTracing 链路
+`./`、`adaptor/`、`crudh/`、`governance/`、`health/`、`health/redischeck/`、`hertzotel/`、`hertztracer/`、`metrics/`、`nns/`、`registry/`、`render/`、`sse/`、`validatorh/`、`versionh/`
 
 ## 硬规则速览（全矩阵适用）
 
