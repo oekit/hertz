@@ -202,12 +202,12 @@ github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLA
 github.com/nyaruka/phonenumbers v1.0.55/go.mod h1:sDaTZ/KPX5f8qyV9qN+hIm+4ZBARJrupC6LuhshJq1U=
 github.com/oekit/bootstrap v0.5.2 h1:P7ELB9jtn5frZvAbnq3cNHDiPulxRZ8jLdfJgoGdn04=
 github.com/oekit/bootstrap v0.5.2/go.mod h1:njJUgGn0oKbXRjIndyG0IdEnikvMpRIMmzFFD/sMUag=
-github.com/oekit/concurrency v0.5.2 h1:D02EY54XyRQ0XLbzktFe3BOIdENgjkbl+SwPv/NoaiY=
-github.com/oekit/concurrency v0.5.2/go.mod h1:05ZsP+05n13WQfGLfgKrTJUcAXK+AgFar0uSephGBZ8=
+github.com/oekit/concurrency v0.5.3 h1:U7rGkd8YIkZg3EU8IWLtozccuT0FLa0UNXTIpTTdlIc=
+github.com/oekit/concurrency v0.5.3/go.mod h1:5l6s9v0K3o/ENp+Dp8NWzjHLBzZKBG52YDHmCbpnIts=
 github.com/oekit/core v0.6.0 h1:3D0r8ff/nOi6/4cc65gxgIDnAznh1XRFzD3QEUOaRWU=
 github.com/oekit/core v0.6.0/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
-github.com/oekit/gormx v0.5.2 h1:ihBEZIEzKG7dTQC9vJ90E0RtCdGE87ckts5G3+mQjIc=
-github.com/oekit/gormx v0.5.2/go.mod h1:E5ZMBp1Mbn7U4kkphvwYawEs6mBXiQKfazPCjY1N4es=
+github.com/oekit/gormx v0.5.3 h1:LYQrFqC6RIdtLGKda6eYHG4n1AU7RCrEkh/1eqkDy8Q=
+github.com/oekit/gormx v0.5.3/go.mod h1:Er2pEW6kvejWqFv1COfhMnd65uWAuK2FDqnL9882Py8=
 github.com/oekit/kitx v0.1.0 h1:choIsMrZa7PE05+mAFF1+AW1+zkBw6FsY55RfSyZmqs=
 github.com/oekit/kitx v0.1.0/go.mod h1:iadhIBas1VBMvQk1eBCDd2QWwEcqVbrf46P8GtCjW6Q=
 github.com/oekit/logx v0.5.0 h1:6Yrs3m3ZCqUazUY9hxYHf6Vzob0bkSjAjw8PGzqi9pw=
@@ -216,8 +216,8 @@ github.com/oekit/logx/hlog v0.1.1 h1:NsLArJfQRRPeleadBl8lwbqATcPvnJJyiRqx61HyROo
 github.com/oekit/logx/hlog v0.1.1/go.mod h1:1m55z4AHhEVnUO+tuOy3wkDsf1fRznHZq+M6JRdHsT0=
 github.com/oekit/metrics v0.1.6 h1:ASJ/6qFVgHgvJ/c58CmR0fPGGUd2z9P3+rqgUDUdrJE=
 github.com/oekit/metrics v0.1.6/go.mod h1:HHf66VG26/7eWDu50N6l5wRDvOXZeZM0IEH5ManQ1lE=
-github.com/oekit/middleware v0.5.1 h1:I+V7xofQch041xYngMWfHy3AbVaPtrdQYCeye2pfdfI=
-github.com/oekit/middleware v0.5.1/go.mod h1:EjVBuEgG1B/TvzwIXEFDXFagWKojFWRFkXP9tTfcZjM=
+github.com/oekit/middleware v0.6.1 h1:fyC2edI0RdTc70L9QODiBC1TdOlX13hCacWZLve/Kgo=
+github.com/oekit/middleware v0.6.1/go.mod h1:18kM+PbmvckIXAzSoMh9FQz2c+rQ4YIR1rc8VTvL9fg=
 github.com/oekit/nns v0.3.4 h1:+8+gm1XapAN8JEf1Gy+GdbR8Hc2LsPI8OgyycbCo8Cc=
 github.com/oekit/nns v0.3.4/go.mod h1:L5ToG3QoZa4oh9SnAoLCXzX3jqjjn1NBBLsH9ZQmO9w=
 github.com/oekit/pkg v0.10.0 h1:kPGYiL4KdWhFes39M2ouUwWMzSC7n/PeGH7cwAA87Es=
