@@ -63,17 +63,17 @@ func (m *MockConn) ReadBinary(int) ([]byte, error) {
 
 // net.Conn
 
-func (m *MockConn) Read([]byte) (int, error)  { return 0, io.EOF }
+func (m *MockConn) Read([]byte) (int, error) { return 0, io.EOF }
 func (m *MockConn) Write(p []byte) (int, error) {
 	m.out = append(m.out, p...)
 	return len(p), nil
 }
-func (m *MockConn) Close() error                       { return nil }
-func (m *MockConn) LocalAddr() net.Addr                { return mockAddr{} }
-func (m *MockConn) RemoteAddr() net.Addr               { return mockAddr{} }
-func (m *MockConn) SetDeadline(time.Time) error        { return nil }
-func (m *MockConn) SetReadDeadline(time.Time) error    { return nil }
-func (m *MockConn) SetWriteDeadline(time.Time) error   { return nil }
+func (m *MockConn) Close() error                     { return nil }
+func (m *MockConn) LocalAddr() net.Addr              { return mockAddr{} }
+func (m *MockConn) RemoteAddr() net.Addr             { return mockAddr{} }
+func (m *MockConn) SetDeadline(time.Time) error      { return nil }
+func (m *MockConn) SetReadDeadline(time.Time) error  { return nil }
+func (m *MockConn) SetWriteDeadline(time.Time) error { return nil }
 
 // network.Conn 超时
 
