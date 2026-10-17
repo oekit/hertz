@@ -10,7 +10,7 @@ require (
 	github.com/oekit/concurrency v0.5.4
 	github.com/oekit/core v0.6.0
 	github.com/oekit/gormx v0.5.4
-	github.com/oekit/kitx v0.1.0
+	github.com/oekit/kitx v0.1.1
 	github.com/oekit/logx v0.5.0
 	github.com/oekit/metrics v0.1.6
 	github.com/oekit/middleware v0.6.2

@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.5.9] — 2026-10-17
+
+- kitx 地板 v0.1.0 → v0.1.1
+
 ## [v0.5.8] — 2026-10-17
 
 - pkg 地板 v0.11.0；concurrency v0.5.4、gormx v0.5.4、middleware v0.6.2 地板跟随
