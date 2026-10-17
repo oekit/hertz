@@ -18,11 +18,10 @@ import (
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
-	"github.com/oekit/logx/shutdown"
 )
 
 func TestRunServer_RegistersShutdownHook(t *testing.T) {
-	mgr := shutdown.New(100 * time.Millisecond)
+	mgr := lifecycle.New(100 * time.Millisecond)
 	app := bootstrap.NewApp(mgr)
 
 	h := server.New(server.WithHostPorts(":0"),
@@ -35,7 +34,7 @@ func TestRunServer_RegistersShutdownHook(t *testing.T) {
 }
 
 func TestRunServer_MultipleServers(t *testing.T) {
-	mgr := shutdown.New(100 * time.Millisecond)
+	mgr := lifecycle.New(100 * time.Millisecond)
 	app := bootstrap.NewApp(mgr)
 
 	h1 := server.New(server.WithHostPorts(":0"),
@@ -54,7 +53,7 @@ func TestRunServer_BootstrapRegistersResource(t *testing.T) {
 	// Verify RunServer registers resource without starting a real server.
 	// Full integration with h.Run() is tested in examples, not unit tests,
 	// because h.Run() blocks until Shutdown is called.
-	mgr := shutdown.New(100 * time.Millisecond)
+	mgr := lifecycle.New(100 * time.Millisecond)
 	app := bootstrap.NewApp(mgr)
 
 	h := server.New(server.WithHostPorts(":0"),
@@ -126,7 +125,7 @@ func (f *fakeApp) RequestShutdown() {
 // TestRunServer_ToleratesEngineNotRunning 钉住 hertz "engine is not running"
 // 错误文案，并验证关闭回调在 engine 未运行（server 从未启动，或已被 h.Run()
 // 内置信号路径优雅关闭——信号关机时 bootstrap 与 hertz 双路并发 Shutdown，
-// 后到者得到该错误）时按成功处理，不向 shutdown.Manager 上报假错误。
+// 后到者得到该错误）时按成功处理，不向 lifecycle.Manager 上报假错误。
 func TestRunServer_ToleratesEngineNotRunning(t *testing.T) {
 	fa := newFakeApp()
 
