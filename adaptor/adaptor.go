@@ -57,6 +57,7 @@ func HertzHandlerFunc(h http.HandlerFunc) app.HandlerFunc {
 //
 //	staticFS := adaptor.HertzHandler(http.FileServer(http.FS(staticFiles)))
 //	h.GET("/static/*filepath", staticFS)
+//
 // 注意：内部仍是 adaptor.HertzHandler(http.FileServer)，每次请求过
 // net/http ⇄ RequestContext 转换。静态资源热路径想要零转换请用
 // NativeStaticFSHandler。
