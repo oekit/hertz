@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -250,7 +251,7 @@ type fakeLifecycleApp struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	closers   []string
-	shutdowns int
+	shutdowns atomic.Int64 // RunServer 后台 goroutine 调用，须原子
 }
 
 func newFakeLifecycleApp() *fakeLifecycleApp {
@@ -269,7 +270,7 @@ func (f *fakeLifecycleApp) GoBackground(_ string, fn func(ctx context.Context)) 
 }
 
 func (f *fakeLifecycleApp) RequestShutdown() {
-	f.shutdowns++
+	f.shutdowns.Add(1)
 	f.cancel()
 }
 
@@ -285,21 +286,21 @@ func TestRunServer_ReadyProbePassed(t *testing.T) {
 	h := server.New(server.WithHostPorts(ln.Addr().String()))
 	app := newFakeLifecycleApp()
 
-	var readyCalled int
+	var readyCalled atomic.Int64
 	RunServer(app, "test-svc", h,
-		WithOnReady(func(ctx context.Context) { readyCalled++ }),
+		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
 		WithReadyProbeTimeout(2*time.Second))
 
 	deadline := time.After(3 * time.Second)
-	for readyCalled == 0 {
+	for readyCalled.Load() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("onReady not called within deadline")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if readyCalled != 1 {
-		t.Fatalf("onReady called %d times, want 1", readyCalled)
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times, want 1", got)
 	}
 	if len(app.closers) != 1 || app.closers[0] != "test-svc" {
 		t.Fatalf("closers = %v", app.closers)
@@ -319,16 +320,16 @@ func TestRunServer_ReadyProbeTimeout(t *testing.T) {
 	h := server.New(server.WithHostPorts(addr))
 	app := newFakeLifecycleApp()
 
-	var readyCalled int
+	var readyCalled atomic.Int64
 	RunServer(app, "test-svc", h,
-		WithOnReady(func(ctx context.Context) { readyCalled++ }),
+		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
 		WithReadyProbeTimeout(300*time.Millisecond))
 
 	time.Sleep(600 * time.Millisecond)
-	if readyCalled != 0 {
+	if readyCalled.Load() != 0 {
 		t.Fatal("onReady should not be called on probe timeout")
 	}
-	if app.shutdowns == 0 {
+	if app.shutdowns.Load() == 0 {
 		t.Fatal("probe timeout should request shutdown")
 	}
 }
