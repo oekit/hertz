@@ -36,19 +36,27 @@ var registerBridgeFileOnce sync.Once
 // 本函数会把自身所在文件注册为 logx 内部帧（logx.SkipCallerFiles），
 // 使经由适配器的框架日志 caller 归属真实调用方；副作用仅此一项。
 //
-// 使用方式（必须传 slog 实例，不可传 hlog 后端的 Logger）：
+// 使用方式：
 //
 //	hlog.SetLogger(hertz.NewLogger(logx.NewSlogLogger("my-http")))
 //
-// ⚠️ 禁止传入 hlog 后端的 Logger（如 logx.WithService(...)），否则会形成
-// adapter → logx → hlog → adapter 的无限递归，导致栈溢出和进程挂死。
-// 此函数会在检测到 hlog 后端时 panic 以防止生产环境不可控故障。
+// ⚠️ 按判据（而非函数名）：**传入 `logx.IsHlogBacked(l) == true` 的 Logger
+// 会形成 adapter → logx → hlog → adapter 的无限递归**（栈溢出 + 进程挂死），
+// 本函数检测到即 panic 兜底（fail-fast，panic message 带实测值）。
+// 常见触发路径：先 `hlog.SetLogger(...)` 改变了全局默认背端，随后
+// `logx.Default()` / `logx.WithService(...)` 取到的就是 hlog-backed 实例——
+// 默认背端未被改动时它们并非 hlog-backed，可以安全传入。
+// 安全做法：`logx.IsHlogBacked(l)` 为 false 即可，或直接传
+// `logx.NewStdLogger(...)` / `logx.NewSlogLogger(...)`。
 func NewLogger(logger logx.Logger) hlog.FullLogger {
 	if logger == nil {
 		panic("hertz.NewLogger: logger must not be nil")
 	}
 	if logx.IsHlogBacked(logger) {
-		panic("hertz.NewLogger: hlog-backed Logger causes infinite recursion; use logx.NewSlogLogger(\"svc\") or logx.UseSlog(\"svc\")")
+		panic("hertz.NewLogger: hlog-backed Logger causes infinite recursion " +
+			"(IsHlogBacked=true) — 常见原因：先 hlog.SetLogger 改了全局默认背端，" +
+			"再经 logx.Default()/WithService 取到 hlog-backed 实例；" +
+			"use logx.NewSlogLogger(\"svc\") / logx.NewStdLogger(\"svc\") instead")
 	}
 	registerBridgeFileOnce.Do(func() {
 		if _, file, _, ok := runtime.Caller(0); ok {

@@ -2,6 +2,8 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [- docs(log): NewLogger 注释改按判据描述 hlog 递归风险（IsHlogBacked 实测值 + 常见触发路径：先 hlog.SetLogger 改全局背端再取 Default/WithService），panic message 同步带上实测判据（#10）
+
 ## [- fix(deps): middleware vv0.7.2 地板对齐（零代码改动）
 
 ## [- fix(deps): gormx vv0.5.5、metrics vv0.1.7、tracing vv0.2.2 地板对齐（零代码改动）
