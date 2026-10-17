@@ -87,15 +87,50 @@ func (mockAddr) String() string  { return "mock:0" }
 
 // PerformRequest 以 ut 风格跑一次请求，但会先挂上 MockConn，使 adaptor 的
 // 4 个导出 handler（HertzHandler / HertzHandlerFunc / StaticFSHandler /
-// StaticDirHandler）可单测。返回状态码与 conn 上的响应字节。
+// StaticDirHandler）可单测。返回状态码与响应字节。
 //
-// 与 ut.PerformRequest 的差别：响应从 Out() 读，而不是 ResponseRecorder.Body。
+// 响应来源两条路径：
+//   - adaptor/HijackHandler：字节写进 MockConn（见 Out）
+//   - 原生 handler（NativeStaticFSHandler 等 c.Write）：走 ctx.Response，
+//     本函数把状态行/头/体拼成 HTTP 报文返回，便于统一断言
 func PerformRequest(e *route.Engine, method, url string, body *ut.Body, headers ...ut.Header) (int, []byte) {
 	ctx := ut.CreateUtRequestContext(method, url, body, headers...)
 	conn := &MockConn{}
 	ctx.SetConn(conn)
 	e.ServeHTTP(context.Background(), ctx)
-	return ctx.Response.StatusCode(), conn.Out()
+
+	code := ctx.Response.StatusCode()
+	if out := conn.Out(); len(out) > 0 {
+		return code, out
+	}
+	// 原生路径：拼 HTTP 报文（便于 Contains 断言头/体）
+	var b []byte
+	b = append(b, "HTTP/1.1 "...)
+	b = append(b, []byte(itoa(code))...)
+	b = append(b, " native\r\n"...)
+	ctx.Response.Header.VisitAll(func(k, v []byte) {
+		b = append(b, k...)
+		b = append(b, ": "...)
+		b = append(b, v...)
+		b = append(b, "\r\n"...)
+	})
+	b = append(b, "\r\n"...)
+	b = append(b, ctx.Response.Body()...)
+	return code, b
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [8]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
 }
 
 // MustGetConn 从 RequestContext 取出 PerformRequest 注入的 MockConn。

@@ -9,6 +9,11 @@
   （原先 `ut.PerformRequest` 直接 nil deref）。响应体在 `MockConn.Out()`，
   不在 `ctx.Response.Body()`（HijackWriter 直写 conn，godoc 已注明）
   （[#9](https://github.com/oekit/hertz/issues/9)）
+- **feat(adaptor)**：`NativeStaticFSHandler`——真正零 adaptor 转换的原生静态
+  handler（fs.ReadFile + c.Write）。Content-Type 走 mime 表、HEAD、404+nosniff、
+  路径穿越拒绝；**不写死 Cache-Control**（`WithNativeCacheControl` 可选）。
+  `StaticFSHandler` godoc 点明内部仍走 adaptor
+  （[#8](https://github.com/oekit/hertz/issues/8)）
 
 ## [v0.5.10] — 2026-10-17
 
