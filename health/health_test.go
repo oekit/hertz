@@ -634,7 +634,7 @@ func TestRegisterHealthRoutes_EmptyPathSkips(t *testing.T) {
 		t.Errorf("GET /ping = %d, want 200", resp.StatusCode())
 	}
 	for _, path := range []string{"/health", "/buildVersion"} {
-		resp := ut.PerformRequest(h2.Engine, consts.MethodGet, path, nil).Result()
+		resp = ut.PerformRequest(h2.Engine, consts.MethodGet, path, nil).Result()
 		if resp.StatusCode() == consts.StatusOK {
 			t.Errorf("GET %s = 200, want 404 (should be skipped)", path)
 		}
