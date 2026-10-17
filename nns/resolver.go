@@ -5,9 +5,9 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	"github.com/oekit/hertz/registry"
-	nnsclient "github.com/oekit/nns/nns/client"
-	ereg "github.com/oekit/registry/registry"
-	"github.com/oekit/registry/registry/sdbridge"
+	nnsclient "github.com/oekit/nns/client"
+	ereg "github.com/oekit/registry"
+	"github.com/oekit/registry/sdbridge"
 )
 
 const resolverName = "nns-hertz"

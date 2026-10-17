@@ -2,7 +2,11 @@ package hertz
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"runtime/debug"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/oekit/core/lifecycle"
@@ -17,15 +21,48 @@ var bootstrapLog = logx.Delegating("hertz-bootstrap")
 // 该 sentinel，只能按文本识别；bootstrap_test.go 有用例钉住该文案）。
 const errEngineNotRunning = "engine is not running"
 
+// defaultReadyProbeTimeout 是 WithOnReady 启用后的默认探活超时。
+const defaultReadyProbeTimeout = 5 * time.Second
+
+// RunServerOption 配置 RunServer 的就绪回调行为。
+type RunServerOption func(*runServerConfig)
+
+type runServerConfig struct {
+	onReady      func(ctx context.Context)
+	probeTimeout time.Duration
+	probeEnabled bool
+}
+
+// WithOnReady 注册就绪回调：TCP 探活通过（全部 HostPort 可建连）后执行，
+// 典型用途是触发延迟注册（app.Ready()，配合 bootstrap/nacos v0.3.0）。
+// 设置本选项即默认启用 TCP 探活；未设置时行为与 v0.5.x 一致（无回调无探活）。
+func WithOnReady(fn func(ctx context.Context)) RunServerOption {
+	return func(cfg *runServerConfig) { cfg.onReady = fn }
+}
+
+// WithReadyProbeTimeout 配置探活超时（默认 5s）。设为负数禁用探活——
+// 直接在 GoBackground 启动前同步回调（不推荐：回调时端口可能尚未监听，
+// hertz OnRun 钩子先于 listenAndServe 执行，无原生就绪信号可用）。
+func WithReadyProbeTimeout(d time.Duration) RunServerOption {
+	return func(cfg *runServerConfig) {
+		cfg.probeTimeout = d
+		cfg.probeEnabled = d >= 0
+	}
+}
+
 // RunServer 将 Hertz Server 注册到 ekit 生命周期管理（bootstrap.App 满足
 // lifecycle.App 接口；transport 适配层只依赖 lifecycle 契约，不依赖 bootstrap）。
 //
 // 该函数会：
 //  1. 通过 app.AddResource 注册 h.Shutdown 作为关闭回调（优雅关闭时自动调用）。
 //  2. 通过 app.GoBackground 在后台启动 h.Run()（阻塞直到 server 退出）。
+//     设置 WithOnReady 时，先循环 TCP dial 探活全部 HostPort（默认超时 5s，
+//     WithReadyProbeTimeout 可调），全部可建连后执行 onReady——hertz 的 OnRun
+//     钩子先于 listenAndServe 执行，无法用作就绪信号，故以探活近似真实就绪
+//     （TCP 可建连 ≠ 业务健康，业务级健康门请配合 hertz/health 检查后再 Ready）。
 //  3. h.Run() 返回 error 或 panic（netpoll 传输层在监听失败如端口占用时
 //     直接 panic 而非返回 error）时调用 app.RequestShutdown() 触发优雅关机，
-//     避免进程无服务地"假活"。
+//     避免进程无服务地"假活"；探活超时同样触发关机（按启动失败处理）。
 //
 // # 关闭语义（对照官方 graceful-shutdown 文档）
 //
@@ -53,14 +90,20 @@ const errEngineNotRunning = "engine is not running"
 //	b.Run(func(app *bootstrap.App) error {
 //	    h := server.New(server.WithHostPorts(":8080"))
 //	    h.Use(mw.DefaultMiddleware(mw.StackConfig{})...)
-//	    hertz.RunServer(app, "hertz", h)
+//	    hertz.RunServer(app, "hertz", h,
+//	        hertz.WithOnReady(func(ctx context.Context) { app.Ready() }))
 //	    <-app.Context().Done() // 阻塞直到收到 SIGINT/SIGTERM
 //	    return nil
 //	})
 //
 // ⚠️ userFn 返回 = 主动关机。若 RunServer 后直接 return nil，
 // bootstrap.Run 会立即执行 shutdown 序列，服务器启动即退出。
-func RunServer(app lifecycle.App, name string, h *server.Hertz) {
+func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServerOption) {
+	cfg := &runServerConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	app.AddResource(name, func(ctx context.Context) error {
 		err := h.Shutdown(ctx)
 		if err != nil && err.Error() != errEngineNotRunning {
@@ -76,10 +119,56 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz) {
 				app.RequestShutdown()
 			}
 		}()
+		if cfg.onReady != nil {
+			if err := probeAndReady(app, name, h, cfg); err != nil {
+				bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
+					"name", name, "err", err)
+				app.RequestShutdown()
+				return
+			}
+		}
 		if err := h.Run(); err != nil {
 			bootstrapLog.Error("hertz server stopped with error, requesting shutdown",
 				"name", name, "err", err)
 			app.RequestShutdown()
 		}
 	})
+}
+
+// probeAndReady 循环 TCP dial 探活全部 HostPort，全部可建连后执行 onReady。
+func probeAndReady(app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
+	timeout := cfg.probeTimeout
+	if !cfg.probeEnabled {
+		timeout = defaultReadyProbeTimeout
+	}
+	if timeout == 0 {
+		timeout = defaultReadyProbeTimeout
+	}
+
+	addr := h.GetOptions().Addr
+	if addr == "" {
+		// 无监听地址可探（测试或自定义 listener）：直接回调
+		cfg.onReady(app.Context())
+		return nil
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		d := net.Dialer{Timeout: 500 * time.Millisecond}
+		conn, err := d.DialContext(app.Context(), "tcp", addr)
+		if err == nil {
+			_ = conn.Close()
+			bootstrapLog.Info("hertz ready probe passed", "name", name, "addr", addr)
+			cfg.onReady(app.Context())
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("ready probe timeout after %s, addr=%s: %w", timeout, addr, err)
+		}
+		select {
+		case <-app.Context().Done():
+			return errors.New("ready probe aborted: app shutting down")
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
 }

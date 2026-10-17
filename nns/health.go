@@ -9,7 +9,7 @@ import (
 
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/logx"
-	ereg "github.com/oekit/registry/registry"
+	ereg "github.com/oekit/registry"
 )
 
 var healthLog = logx.Delegating("nns-hertz")

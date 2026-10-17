@@ -2,6 +2,23 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.6.0] — 2026-10-17
+
+### Added（go-kratos 对齐）
+- `transportx` 新子包：Hertz RequestContext → core/transport 适配
+  （`NewServerTransport`/`NewServerContext`；Kind=http、Endpoint=Host、Operation=PATH，
+  header 读写经协议无关 `transport.Header`）
+- `chainmw` 新子包：core/chain 中间件栈接入 Hertz——`Wrap`（自动注入 server Transporter，
+  错误出口默认接 `mw.Fail` 统一响应格式，可 `WithOnError` 接管）、`FromHertz` 混编桥
+- `RunServer` 变参扩展：`WithOnReady`（TCP 探活通过后回调，典型用途 `app.Ready()`
+  触发 bootstrap/nacos v0.3.0 延迟注册）、`WithReadyProbeTimeout`（默认 5s；探活失败
+  按启动失败触发关机）。hertz OnRun 钩子先于 listenAndServe 执行，无原生就绪信号，
+  探活是对真实就绪的近似；未设置 OnReady 时行为与 v0.5.x 一致
+
+### Changed
+- 依赖升级：registry v0.4.0 / nns v0.4.0 / core v0.7.0 / middleware v0.7.0
+  （registry/nns 包提升至模块根，导入路径变更）
+
 ## [Unreleased]
 
 - **feat(adaptor)**：`MockConn` + `PerformRequest` 测试 helper——补上

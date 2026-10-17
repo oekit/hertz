@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
-	ereg "github.com/oekit/registry/registry"
+	ereg "github.com/oekit/registry"
 	registrymocks "github.com/oekit/registry/registrymocks"
 )
 

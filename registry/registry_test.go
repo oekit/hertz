@@ -9,7 +9,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
-	ereg "github.com/oekit/registry/registry"
+	ereg "github.com/oekit/registry"
 	registrymocks "github.com/oekit/registry/registrymocks"
 )
 

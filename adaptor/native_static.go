@@ -84,7 +84,7 @@ func NativeStaticFSHandler(prefix string, fsys fs.FS, opts ...NativeStaticOption
 		}
 		c.SetStatusCode(http.StatusOK)
 		// c.Write 直接进响应缓冲，不经 net/http adaptor
-		c.Write(data)
+		_, _ = c.Write(data)
 	}
 }
 
@@ -116,5 +116,5 @@ func notFound(c *app.RequestContext) {
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.SetStatusCode(http.StatusNotFound)
 	c.Header("Content-Type", "text/plain; charset=utf-8")
-	c.Write([]byte("404 page not found\n"))
+	_, _ = c.WriteString("404 page not found\n")
 }

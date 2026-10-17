@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
-	nnsclient "github.com/oekit/nns/nns/client"
+	nnsclient "github.com/oekit/nns/client"
 	registrymocks "github.com/oekit/registry/registrymocks"
 )
 

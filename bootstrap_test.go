@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -243,3 +244,105 @@ func BenchmarkHlogAdapter_CtxInfof(b *testing.B) {
 }
 
 var _ = config.Option{}
+
+// fakeLifecycleApp 是 lifecycle.App 的最小测试实现（ready 探活用）。
+type fakeLifecycleApp struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closers   []string
+	shutdowns int
+}
+
+func newFakeLifecycleApp() *fakeLifecycleApp {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &fakeLifecycleApp{ctx: ctx, cancel: cancel}
+}
+
+func (f *fakeLifecycleApp) Context() context.Context { return f.ctx }
+
+func (f *fakeLifecycleApp) AddResource(name string, _ func(ctx context.Context) error) {
+	f.closers = append(f.closers, name)
+}
+
+func (f *fakeLifecycleApp) GoBackground(_ string, fn func(ctx context.Context)) {
+	go fn(f.ctx)
+}
+
+func (f *fakeLifecycleApp) RequestShutdown() {
+	f.shutdowns++
+	f.cancel()
+}
+
+// TestRunServer_ReadyProbePassed 钉住探活通过路径：监听地址可建连后
+// onReady 被执行。
+func TestRunServer_ReadyProbePassed(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	h := server.New(server.WithHostPorts(ln.Addr().String()))
+	app := newFakeLifecycleApp()
+
+	var readyCalled int
+	RunServer(app, "test-svc", h,
+		WithOnReady(func(ctx context.Context) { readyCalled++ }),
+		WithReadyProbeTimeout(2*time.Second))
+
+	deadline := time.After(3 * time.Second)
+	for readyCalled == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("onReady not called within deadline")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if readyCalled != 1 {
+		t.Fatalf("onReady called %d times, want 1", readyCalled)
+	}
+	if len(app.closers) != 1 || app.closers[0] != "test-svc" {
+		t.Fatalf("closers = %v", app.closers)
+	}
+}
+
+// TestRunServer_ReadyProbeTimeout 钉住探活超时路径：目标不可建连时
+// 按启动失败处理（RequestShutdown）。
+func TestRunServer_ReadyProbeTimeout(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close() // 得到确定不可建连的地址
+
+	h := server.New(server.WithHostPorts(addr))
+	app := newFakeLifecycleApp()
+
+	var readyCalled int
+	RunServer(app, "test-svc", h,
+		WithOnReady(func(ctx context.Context) { readyCalled++ }),
+		WithReadyProbeTimeout(300*time.Millisecond))
+
+	time.Sleep(600 * time.Millisecond)
+	if readyCalled != 0 {
+		t.Fatal("onReady should not be called on probe timeout")
+	}
+	if app.shutdowns == 0 {
+		t.Fatal("probe timeout should request shutdown")
+	}
+}
+
+// TestRunServer_NoOnReady_DefaultShape 钉住默认路径：未设置 OnReady 时
+// 不探活、行为与 v0.5.x 一致。
+func TestRunServer_NoOnReady_DefaultShape(t *testing.T) {
+	h := server.New(server.WithHostPorts("127.0.0.1:0"))
+	app := newFakeLifecycleApp()
+
+	RunServer(app, "test-svc", h)
+	time.Sleep(100 * time.Millisecond)
+
+	if len(app.closers) != 1 {
+		t.Fatalf("closers = %v", app.closers)
+	}
+}

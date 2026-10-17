@@ -7,9 +7,9 @@ import (
 	"testing"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
-	"github.com/oekit/nns/nns"
+	"github.com/oekit/nns"
+	ereg "github.com/oekit/registry"
 	nacospkg "github.com/oekit/registry/nacos"
-	ereg "github.com/oekit/registry/registry"
 )
 
 // TestNewRegistry_NilRegistrar_OK 验证 mock 模式下 Register/Deregister 不报错（静默跳过）。
