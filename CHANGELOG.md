@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+- **feat(adaptor)**：`MockConn` + `PerformRequest` 测试 helper——补上
+  `rc.GetWriter()` 所需的 network.Conn，4 个导出 handler 可用 ut 风格单测
+  （原先 `ut.PerformRequest` 直接 nil deref）。响应体在 `MockConn.Out()`，
+  不在 `ctx.Response.Body()`（HijackWriter 直写 conn，godoc 已注明）
+  （[#9](https://github.com/oekit/hertz/issues/9)）
+
 ## [v0.5.2] — 2026-10-17
 
 ### Fixed
