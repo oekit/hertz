@@ -13,7 +13,7 @@ require (
 	github.com/oekit/kitx v0.1.1
 	github.com/oekit/logx v0.6.0
 	github.com/oekit/metrics v0.1.7
-	github.com/oekit/middleware v0.7.1
+	github.com/oekit/middleware v0.7.2
 	github.com/oekit/nns v0.4.1
 	github.com/oekit/pkg v0.11.0
 	github.com/oekit/registry v0.4.1

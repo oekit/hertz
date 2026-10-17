@@ -2,6 +2,8 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [- fix(deps): middleware vv0.7.2 地板对齐（零代码改动）
+
 ## [- fix(deps): gormx vv0.5.5、metrics vv0.1.7、tracing vv0.2.2 地板对齐（零代码改动）
 
 ## [- fix(deps): 全部 oekit 依赖地板对齐最新（bootstrap v0.6.1、middleware v0.7.1、registry v0.4.1、nns v0.4.1、logx v0.6.0、core v0.7.0，零代码改动）
