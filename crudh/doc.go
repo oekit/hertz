@@ -5,8 +5,12 @@
 //
 // 用法:
 //
-//	repo := gormrepo.NewGormRepository[Project](db)
-//	svc := crud.NewBaseService[Project, CreateReq, UpdateReq](repo)
+//	// ID 为实体主键类型（int64 自增 / string 文本主键等）
+//	repo := gormrepo.NewGormRepository[Project, int64](db)
+//	svc := crud.NewBaseService[Project, int64, CreateReq, UpdateReq](repo)
 //	h := crudh.NewHandler(svc)
 //	h.RegisterRoutes(group, "/projects")
+//
+// 路径参数经缺省解析（int 系 ParseInt / string 直通）或 WithIDParser
+// 注入的解析函数转为主键类型。
 package crudh

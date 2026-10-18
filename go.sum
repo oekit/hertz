@@ -206,8 +206,8 @@ github.com/oekit/concurrency v0.5.4 h1:u9fL7LRNkPdI8O3x4x+TTRJWlhFyTRFr58b+Zg7WB
 github.com/oekit/concurrency v0.5.4/go.mod h1:K5wV2UwkfvYUQFOawBCmaE29AGhWTGs3hsKu2vvKw4Y=
 github.com/oekit/core v0.7.0 h1:Iexn7+2xgi3NFexHoYgEzWWxEz7H1AjxyAQ7tLibA98=
 github.com/oekit/core v0.7.0/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
-github.com/oekit/gormx v0.5.5 h1:lRFk8j9Dnpk9kyMbAv3KBWQEiqzcncMCT81y8K5ekTE=
-github.com/oekit/gormx v0.5.5/go.mod h1:g0fdV2oKy1kcJCs55CE0UOm2VML13HrRfMSdfZNq+Uk=
+github.com/oekit/gormx v0.6.0 h1:FWQ/29pSma6vR1lhVqce0A98Fzppr6ZWIGr9WNqX1Rg=
+github.com/oekit/gormx v0.6.0/go.mod h1:g0fdV2oKy1kcJCs55CE0UOm2VML13HrRfMSdfZNq+Uk=
 github.com/oekit/kitx v0.1.1 h1:oc1S5MEr185TEhuKWtDS+tyPlcQLnOSLq2auuujezPM=
 github.com/oekit/kitx v0.1.1/go.mod h1:IxI6X217Uhjx2jXBKAmpOs2gstw8Od3ql6Jcv9Lqxi0=
 github.com/oekit/logx v0.6.0 h1:ybT9M1u+IbvLfncrpN+WRU1A3Cy9e6oAr1I5bo7H/F0=
