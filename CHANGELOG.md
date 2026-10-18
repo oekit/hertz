@@ -2,13 +2,21 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [- docs(log): NewLogger 注释改按判据描述 hlog 递归风险（IsHlogBacked 实测值 + 常见触发路径：先 hlog.SetLogger 改全局背端再取 Default/WithService），panic message 同步带上实测判据（#10）
+## [v0.6.4] — 2026-10-18
 
-## [- fix(deps): middleware vv0.7.2 地板对齐（零代码改动）
+- docs(log): NewLogger 注释改按判据描述 hlog 递归风险（IsHlogBacked 实测值 + 常见触发路径：先 hlog.SetLogger 改全局背端再取 Default/WithService），panic message 同步带上实测判据（[#10](https://github.com/oekit/hertz/issues/10)）
 
-## [- fix(deps): gormx vv0.5.5、metrics vv0.1.7、tracing vv0.2.2 地板对齐（零代码改动）
+## [v0.6.3] — 2026-10-18
 
-## [- fix(deps): 全部 oekit 依赖地板对齐最新（bootstrap v0.6.1、middleware v0.7.1、registry v0.4.1、nns v0.4.1、logx v0.6.0、core v0.7.0，零代码改动）
+- fix(deps): middleware v0.7.1 → v0.7.2 地板对齐（零代码改动）
+
+## [v0.6.2] — 2026-10-18
+
+- fix(deps): gormx v0.5.4 → v0.5.5、metrics v0.1.6 → v0.1.7、tracing v0.2.1 → v0.2.2 地板对齐（零代码改动）
+
+## [v0.6.1] — 2026-10-18
+
+- fix(deps): 全部 oekit 依赖地板对齐最新（bootstrap v0.5.3 → v0.6.1、logx v0.5.0 → v0.6.0、middleware v0.7.0 → v0.7.1、nns v0.4.0 → v0.4.1、registry v0.4.0 → v0.4.1，零代码改动）
 
 ## [v0.6.0] — 2026-10-17
 
@@ -23,12 +31,7 @@
   按启动失败触发关机）。hertz OnRun 钩子先于 listenAndServe 执行，无原生就绪信号，
   探活是对真实就绪的近似；未设置 OnReady 时行为与 v0.5.x 一致
 
-### Changed
-- 依赖升级：registry v0.4.0 / nns v0.4.0 / core v0.7.0 / middleware v0.7.0
-  （registry/nns 包提升至模块根，导入路径变更）
-
-## [Unreleased]
-
+### Added（adaptor）
 - **feat(adaptor)**：`MockConn` + `PerformRequest` 测试 helper——补上
   `rc.GetWriter()` 所需的 network.Conn，4 个导出 handler 可用 ut 风格单测
   （原先 `ut.PerformRequest` 直接 nil deref）。响应体在 `MockConn.Out()`，
@@ -39,6 +42,10 @@
   路径穿越拒绝；**不写死 Cache-Control**（`WithNativeCacheControl` 可选）。
   `StaticFSHandler` godoc 点明内部仍走 adaptor
   （[#8](https://github.com/oekit/hertz/issues/8)）
+
+### Changed
+- 依赖升级：registry v0.4.0 / nns v0.4.0 / core v0.7.0 / middleware v0.7.0
+  （registry/nns 包提升至模块根，导入路径变更）
 
 ## [v0.5.10] — 2026-10-17
 
@@ -70,9 +77,9 @@
   v0.5.2 tag 曾因 CI 存量红被重指向 shadow 修复提交，导致 tag 树与
   sum.golang.org 首次记录的校验和不一致（默认 GOSUMDB 用户拉取报
   checksum mismatch，[#7](https://github.com/oekit/hertz/issues/7)）。
-  **处置**：v0.5.2 tag 已恢复至与 sumdb 记录一致的原提交；本 v0.5.3 包含
-  全部内容（deps 对齐 + shadow 修复），受影响用户请直接使用 v0.5.3，
-  或临时 `GOPRIVATE=github.com/oekit` 直连
+  **处置**：v0.5.2 tag 已恢复至与 sumdb 记录一致的原提交（默认 GOSUMDB 可正常拉取）；
+  shadow 修复自 v0.5.4 起可用（v0.5.3 曾按本 issue 请求发布，后随事故版本批次撤删，
+  勿引用），受影响用户请使用 v0.5.4 或更高版本
 
 ## [v0.5.2] — 2026-10-17
 
