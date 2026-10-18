@@ -1,7 +1,7 @@
 # AGENTS.md — oekit/hertz
 
 > Hertz 运行时集成——日志桥接、生命周期、SSE/health/metrics、适配器、OTel、crudh/validatorh/versionh（原 handler 微库收编）
-> 当前版本：`v0.5.4` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
+> 当前版本：`v0.6.4` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
 `./`、`adaptor/`、`crudh/`、`governance/`、`health/`、`health/redischeck/`、`hertzotel/`、`hertztracer/`、`metrics/`、`nns/`、`registry/`、`render/`、`sse/`、`validatorh/`、`versionh/`
