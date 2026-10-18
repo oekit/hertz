@@ -2,6 +2,22 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.0] — 2026-10-19
+
+**BREAKING**: crudh 主键类型泛型化（跟随 gormx v0.6.0 `[T, ID comparable]`，gormx#7 问题 1）
+
+- `Handler[T, C, U]` → `Handler[T, ID comparable, C, U]`；`HandlerOption`/`WithSortableColumns`/
+  `NewHandler` 签名跟随（`crud.Service[T, ID, C, U]`）
+- 新增 `WithIDParser(fn func(string) (ID, error))`：路径参数 → ID 解析注入
+- 缺省解析（不注入时）：int 系主键 `strconv.ParseInt`（宽度随 ID 类型，int64 与 v0.6 之前
+  行为一致）、string 主键直通；其余 comparable 类型必须显式注入，缺省解析失败按 400 拒绝
+  （fail-closed）
+- 存量 int64 调用点机械迁移：`NewHandler[Item, C, U]` → `NewHandler[Item, int64, C, U]`；
+  文本主键项目传恒等解析 `WithIDParser[Doc, string, C, U](func(s string) (string, error) { return s, nil })`
+- gormx 地板 v0.5.5 → **v0.6.0**
+- 新增文本主键端到端测试（hex 串路径参数经 WithIDParser 直通 + Get/Delete/404 链）与
+  `defaultParseID` 单测（int64/string 双形态）
+
 ## [v0.6.4] — 2026-10-18
 
 - docs(log): NewLogger 注释改按判据描述 hlog 递归风险（IsHlogBacked 实测值 + 常见触发路径：先 hlog.SetLogger 改全局背端再取 Default/WithService），panic message 同步带上实测判据（[#10](https://github.com/oekit/hertz/issues/10)）

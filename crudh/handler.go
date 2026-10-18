@@ -6,6 +6,7 @@ package crudh
 
 import (
 	"context"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,19 +24,34 @@ import (
 var sortColumnRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Handler 是通用 CRUD HTTP Handler。
-type Handler[T any, CreateReq, UpdateReq any] struct {
-	svc crud.Service[T, CreateReq, UpdateReq]
+// ID 为实体主键类型（int64 自增 / string 文本主键等，见 crud.Service），
+// 路径参数经 IDParser 解析为 ID。
+type Handler[T any, ID comparable, CreateReq, UpdateReq any] struct {
+	svc crud.Service[T, ID, CreateReq, UpdateReq]
+	// idParser 是路径参数 → ID 的解析函数（WithIDParser 注入）；
+	// nil 时用缺省解析（见 defaultParseID）。
+	idParser func(string) (ID, error)
 	// sortable 是排序白名单（小写列名）；nil 表示仅做标识符格式校验
 	sortable map[string]struct{}
 }
 
 // HandlerOption 是 [NewHandler] 的配置选项。
-type HandlerOption[T any, CreateReq, UpdateReq any] func(*Handler[T, CreateReq, UpdateReq])
+type HandlerOption[T any, ID comparable, CreateReq, UpdateReq any] func(*Handler[T, ID, CreateReq, UpdateReq])
+
+// WithIDParser 注入路径参数 → ID 的解析函数。
+//
+// 缺省解析：int 系主键按 strconv.ParseInt（宽度随 ID 类型，与 v0.6 之前
+// int64 行为一致）、string 主键直通；其余 comparable 类型必须显式注入，
+// 缺省解析失败按 400 拒绝（fail-closed，绝不猜测）。
+// 文本主键项目传恒等解析即可：`WithIDParser[Doc, string, C, U](func(s string) (string, error) { return s, nil })`。
+func WithIDParser[T any, ID comparable, CreateReq, UpdateReq any](fn func(string) (ID, error)) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.idParser = fn }
+}
 
 // WithSortableColumns 设置 List 接口排序参数的白名单列名。
 // 未设置时仅做标识符格式校验；设置后白名单外的列名返回 400。
-func WithSortableColumns[T any, CreateReq, UpdateReq any](cols ...string) HandlerOption[T, CreateReq, UpdateReq] {
-	return func(h *Handler[T, CreateReq, UpdateReq]) {
+func WithSortableColumns[T any, ID comparable, CreateReq, UpdateReq any](cols ...string) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) {
 		h.sortable = make(map[string]struct{}, len(cols))
 		for _, col := range cols {
 			h.sortable[strings.ToLower(col)] = struct{}{}
@@ -44,8 +60,8 @@ func WithSortableColumns[T any, CreateReq, UpdateReq any](cols ...string) Handle
 }
 
 // NewHandler 创建 CRUD Handler。
-func NewHandler[T any, CreateReq, UpdateReq any](svc crud.Service[T, CreateReq, UpdateReq], opts ...HandlerOption[T, CreateReq, UpdateReq]) *Handler[T, CreateReq, UpdateReq] {
-	h := &Handler[T, CreateReq, UpdateReq]{svc: svc}
+func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service[T, ID, CreateReq, UpdateReq], opts ...HandlerOption[T, ID, CreateReq, UpdateReq]) *Handler[T, ID, CreateReq, UpdateReq] {
+	h := &Handler[T, ID, CreateReq, UpdateReq]{svc: svc}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -53,7 +69,7 @@ func NewHandler[T any, CreateReq, UpdateReq any](svc crud.Service[T, CreateReq, 
 }
 
 // Create 处理 POST 创建请求。
-func (h *Handler[T, C, U]) Create(ctx context.Context, c *app.RequestContext) {
+func (h *Handler[T, ID, C, U]) Create(ctx context.Context, c *app.RequestContext) {
 	var req C
 	if err := validatorh.BindAndValidate(c, &req); err != nil {
 		mw.Fail(ctx, c, err)
@@ -70,8 +86,8 @@ func (h *Handler[T, C, U]) Create(ctx context.Context, c *app.RequestContext) {
 }
 
 // Get 处理 GET 单个获取请求。
-func (h *Handler[T, C, U]) Get(ctx context.Context, c *app.RequestContext) {
-	id, err := parseID(c)
+func (h *Handler[T, ID, C, U]) Get(ctx context.Context, c *app.RequestContext) {
+	id, err := h.parseID(c)
 	if err != nil {
 		mw.ErrorResp(c, 400, "invalid id")
 		return
@@ -87,7 +103,7 @@ func (h *Handler[T, C, U]) Get(ctx context.Context, c *app.RequestContext) {
 }
 
 // List 处理 GET 列表查询请求（带分页）。
-func (h *Handler[T, C, U]) List(ctx context.Context, c *app.RequestContext) {
+func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) {
 	q := crud.NewQuery()
 
 	// 绑定分页参数（无效值返回 400）
@@ -129,8 +145,8 @@ func (h *Handler[T, C, U]) List(ctx context.Context, c *app.RequestContext) {
 }
 
 // Update 处理 PUT 更新请求。
-func (h *Handler[T, C, U]) Update(ctx context.Context, c *app.RequestContext) {
-	id, err := parseID(c)
+func (h *Handler[T, ID, C, U]) Update(ctx context.Context, c *app.RequestContext) {
+	id, err := h.parseID(c)
 	if err != nil {
 		mw.ErrorResp(c, 400, "invalid id")
 		return
@@ -152,8 +168,8 @@ func (h *Handler[T, C, U]) Update(ctx context.Context, c *app.RequestContext) {
 }
 
 // Delete 处理 DELETE 删除请求。
-func (h *Handler[T, C, U]) Delete(ctx context.Context, c *app.RequestContext) {
-	id, err := parseID(c)
+func (h *Handler[T, ID, C, U]) Delete(ctx context.Context, c *app.RequestContext) {
+	id, err := h.parseID(c)
 	if err != nil {
 		mw.ErrorResp(c, 400, "invalid id")
 		return
@@ -168,7 +184,7 @@ func (h *Handler[T, C, U]) Delete(ctx context.Context, c *app.RequestContext) {
 }
 
 // RegisterRoutes 注册 CRUD 路由到 Hertz Group。
-func (h *Handler[T, C, U]) RegisterRoutes(rg *route.RouterGroup, prefix string) {
+func (h *Handler[T, ID, C, U]) RegisterRoutes(rg *route.RouterGroup, prefix string) {
 	rg.POST(prefix, h.Create)
 	rg.GET(prefix, h.List)
 	rg.GET(prefix+"/:id", h.Get)
@@ -176,14 +192,46 @@ func (h *Handler[T, C, U]) RegisterRoutes(rg *route.RouterGroup, prefix string) 
 	rg.DELETE(prefix+"/:id", h.Delete)
 }
 
-// parseID 从 URL 参数中解析 ID。
-func parseID(c *app.RequestContext) (int64, error) {
+// parseID 从 URL 参数中解析 ID（WithIDParser 或缺省解析）。
+func (h *Handler[T, ID, C, U]) parseID(c *app.RequestContext) (ID, error) {
 	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		return 0, errors.NewBadRequestError("invalid id: " + idStr)
+	if h.idParser != nil {
+		return h.idParser(idStr)
 	}
-	return id, nil
+	return defaultParseID[ID](idStr)
+}
+
+// defaultParseID 缺省路径参数解析：int 系主键 strconv.ParseInt（宽度随
+// ID 类型，int64 与 v0.6 之前行为一致）、string 主键直通；其余 comparable
+// 类型不支持缺省解析（须 WithIDParser 注入），一律按 400 拒绝。
+func defaultParseID[ID comparable](s string) (ID, error) {
+	var zero ID
+	t := reflect.TypeOf(zero)
+	if t == nil {
+		return zero, errors.NewBadRequestError("invalid id: " + s)
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return any(s).(ID), nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v, err := strconv.ParseInt(s, 10, t.Bits())
+		if err != nil {
+			return zero, errors.NewBadRequestError("invalid id: " + s)
+		}
+		out := reflect.New(t).Elem()
+		out.SetInt(v)
+		return out.Interface().(ID), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v, err := strconv.ParseUint(s, 10, t.Bits())
+		if err != nil {
+			return zero, errors.NewBadRequestError("invalid id: " + s)
+		}
+		out := reflect.New(t).Elem()
+		out.SetUint(v)
+		return out.Interface().(ID), nil
+	default:
+		return zero, errors.NewBadRequestError("invalid id: " + s)
+	}
 }
 
 // parseSortParam 解析并校验单个排序片段 "<column>[ ASC|DESC]"。

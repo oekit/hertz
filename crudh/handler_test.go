@@ -140,9 +140,9 @@ func setPathParam(c *app.RequestContext, key, value string) {
 	c.Params = param.Params{{Key: key, Value: value}}
 }
 
-func newHandler() (*Handler[Item, CreateItemReq, UpdateItemReq], *mockItemService) {
+func newHandler() (*Handler[Item, int64, CreateItemReq, UpdateItemReq], *mockItemService) {
 	svc := newMockItemService()
-	return NewHandler[Item, CreateItemReq, UpdateItemReq](svc), svc
+	return NewHandler[Item, int64, CreateItemReq, UpdateItemReq](svc), svc
 }
 
 func parseResp(t *testing.T, c *app.RequestContext) apiResponse {
@@ -383,31 +383,31 @@ func TestDelete_NotFound(t *testing.T) {
 // --- parseID tests ---
 
 func TestParseID_Valid(t *testing.T) {
-	c := app.NewContext(0)
-	setPathParam(c, "id", "42")
-
-	id, err := parseID(c)
+	id, err := defaultParseID[int64]("42")
 	assert.Nil(t, err)
 	assert.DeepEqual(t, int64(42), id)
 }
 
 func TestParseID_Invalid(t *testing.T) {
-	c := app.NewContext(0)
-	setPathParam(c, "id", "abc")
-
-	_, err := parseID(c)
+	_, err := defaultParseID[int64]("abc")
 	if err == nil {
 		t.Error("expected error for invalid id")
 	}
 }
 
 func TestParseID_Empty(t *testing.T) {
-	c := app.NewContext(0)
-
-	_, err := parseID(c)
+	_, err := defaultParseID[int64]("")
 	if err == nil {
 		t.Error("expected error for empty id")
 	}
+}
+
+// TestParseID_StringPK 文本主键缺省解析直通（gormx#7 场景）。
+func TestParseID_StringPK(t *testing.T) {
+	const hexID = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+	id, err := defaultParseID[string](hexID)
+	assert.Nil(t, err)
+	assert.DeepEqual(t, hexID, id)
 }
 
 // --- RegisterRoutes tests ---
@@ -424,7 +424,7 @@ func TestRegisterRoutes(t *testing.T) {
 
 func TestNewHandler_NotNil(t *testing.T) {
 	svc := newMockItemService()
-	h := NewHandler[Item, CreateItemReq, UpdateItemReq](svc)
+	h := NewHandler[Item, int64, CreateItemReq, UpdateItemReq](svc)
 	if h == nil {
 		t.Fatal("expected non-nil handler")
 	}
@@ -474,8 +474,8 @@ func TestList_SortValidFormats(t *testing.T) {
 // TestList_SortAllowlist 白名单模式下，格式合法但不在白名单的列返回 400。
 func TestList_SortAllowlist(t *testing.T) {
 	svc := newMockItemService()
-	h := NewHandler[Item, CreateItemReq, UpdateItemReq](svc,
-		WithSortableColumns[Item, CreateItemReq, UpdateItemReq]("id", "name"))
+	h := NewHandler[Item, int64, CreateItemReq, UpdateItemReq](svc,
+		WithSortableColumns[Item, int64, CreateItemReq, UpdateItemReq]("id", "name"))
 
 	for _, s := range []string{"id desc", "NAME"} {
 		c := app.NewContext(0)
@@ -496,4 +496,91 @@ func TestList_SortAllowlist(t *testing.T) {
 			t.Errorf("sort=%q not in allowlist: expected 400, got %d", s, c.Response.StatusCode())
 		}
 	}
+}
+
+// --- 文本主键端到端（gormx#7 / [T, ID] 泛型配套）---
+
+type hexDoc struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type createDocReq struct {
+	Name string `json:"name" validate:"required"`
+}
+
+type mockDocService struct {
+	mu   sync.Mutex
+	docs map[string]*hexDoc
+}
+
+func (m *mockDocService) Create(ctx context.Context, req *createDocReq) (*hexDoc, error) {
+	return nil, bizerrors.NewBadRequestError("not exercised")
+}
+
+func (m *mockDocService) Get(ctx context.Context, id string) (*hexDoc, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.docs[id]
+	if !ok {
+		// 与 crud.BaseService.Get 的包装行为一致（mw.Fail 按 BizError 渲染 404）
+		return nil, bizerrors.NewBizError(404, "not found")
+	}
+	return d, nil
+}
+
+func (m *mockDocService) GetOne(ctx context.Context, q *crud.Query) (*hexDoc, error) {
+	return nil, crud.ErrNotFound
+}
+
+func (m *mockDocService) List(ctx context.Context, q *crud.Query) (*crud.PageResponse[hexDoc], error) {
+	return &crud.PageResponse[hexDoc]{}, nil
+}
+
+func (m *mockDocService) Update(ctx context.Context, id string, req *createDocReq) (*hexDoc, error) {
+	return nil, crud.ErrNotFound
+}
+
+func (m *mockDocService) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.docs[id]; !ok {
+		return crud.ErrNotFound
+	}
+	delete(m.docs, id)
+	return nil
+}
+
+func TestHandler_StringPK_EndToEnd(t *testing.T) {
+	const hexID = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
+	svc := &mockDocService{docs: map[string]*hexDoc{hexID: {ID: hexID, Name: "doc1"}}}
+	h := NewHandler[hexDoc, string, createDocReq, createDocReq](svc,
+		WithIDParser[hexDoc, string, createDocReq, createDocReq](func(s string) (string, error) { return s, nil }),
+	)
+
+	// GET :id —— hex 串路径参数经 WithIDParser 直通
+	c := app.NewContext(0)
+	c.Request.SetMethod(consts.MethodGet)
+	setPathParam(c, "id", hexID)
+	h.Get(context.Background(), c)
+	assert.DeepEqual(t, consts.StatusOK, c.Response.StatusCode())
+	resp := parseResp(t, c)
+	var got hexDoc
+	_ = json.Unmarshal(resp.Data, &got)
+	assert.DeepEqual(t, hexID, got.ID)
+
+	// DELETE :id
+	c = app.NewContext(0)
+	c.Request.SetMethod(consts.MethodDelete)
+	setPathParam(c, "id", hexID)
+	h.Delete(context.Background(), c)
+	assert.DeepEqual(t, consts.StatusOK, c.Response.StatusCode())
+
+	// 再读 → 业务码 404（ErrNotFound → BizError）
+	c = app.NewContext(0)
+	c.Request.SetMethod(consts.MethodGet)
+	setPathParam(c, "id", hexID)
+	h.Get(context.Background(), c)
+	resp = parseResp(t, c)
+	assert.DeepEqual(t, 404, resp.Code)
 }
