@@ -1,7 +1,7 @@
 # AGENTS.md — oekit/hertz
 
 > Hertz 运行时集成（模块根扁平化）——日志桥接、生命周期、SSE/health/metrics、适配器、OTel、crudh/validatorh（基于 kitx/validator）/versionh（原 handler 微库收编）；RunServer 变参就绪门 WithOnReady（全部 HostPort TCP 探活可建连后回调，探活超时按启动失败优雅关机；缺省超时 5s 经 WithReadyProbeTimeout 调整/WithReadyAddr 探活地址），配合 bootstrap Ready 实现 NNS 延迟注册；transportx（hertz→core/transport 同构适配器）+ chainmw 桥接
-> 当前版本：`v0.7.0` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
+> 当前版本：`v0.7.1` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
 `./`、`adaptor/`、`chainmw/`、`crudh/`、`governance/`、`health/`、`health/redischeck/`、`hertzotel/`、`hertztracer/`、`metrics/`、`nns/`、`registry/`、`render/`、`sse/`、`transportx/`、`validatorh/`、`versionh/`
