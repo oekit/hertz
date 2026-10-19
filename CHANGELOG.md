@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.7.1] — 2026-10-19
+
+- build: 矩阵内依赖地板对齐（align_floors 不动点）：bootstrap v0.6.1 → v0.6.2、concurrency v0.5.4 → v0.17.0、core v0.7.0 → v0.9.2、kitx v0.1.1 → v0.2.0、logx v0.6.0 → v0.7.0、middleware v0.7.2 → v0.12.0、nns v0.4.1 → v0.4.2、pkg v0.11.0 → v0.15.1
+
 ## [v0.7.0] — 2026-10-19
 
 **BREAKING**: crudh 主键类型泛型化（跟随 gormx v0.6.0 `[T, ID comparable]`，gormx#7 问题 1）
