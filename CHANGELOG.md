@@ -2,6 +2,14 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+- fix(health): `/health` 响应形态提供导出面——消费方不必手写信封结构体（[#26](https://github.com/oekit/hertz/issues/26)）
+  - 新增 `health.HealthResponse`（信封 `{code,data,message,trace_id}`，`data` 强类型）+ `health.HealthData`（`{checks,status}`），消费方可直接 `json.Unmarshal` 到导出类型
+  - 新增 `health.Status` 类型与 `StatusOK` / `StatusDegraded` / `StatusError` 常量——比较状态不再硬编码字面量
+  - **BREAKING**: `CheckResult.Status` 由 `string` 改为 `health.Status`（底层仍是 `string`）。与字面量比较的调用点不受影响；把 `CheckResult.Status` 赋给 `string` 变量的调用点需显式 `string(...)` 转换
+  - 响应体字节不变：`data` 由 `map[string]any` 改为强类型结构，键序与取值与既有响应完全一致
+
 ## [v0.7.1] — 2026-10-19
 
 - build: 矩阵内依赖地板对齐（align_floors 不动点）：bootstrap v0.6.1 → v0.6.2、concurrency v0.5.4 → v0.17.0、core v0.7.0 → v0.9.2、kitx v0.1.1 → v0.2.0、logx v0.6.0 → v0.7.0、middleware v0.7.2 → v0.12.0、nns v0.4.1 → v0.4.2、pkg v0.11.0 → v0.15.1
