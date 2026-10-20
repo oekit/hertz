@@ -21,6 +21,12 @@
 //
 // 响应格式: 使用 ekit 统一响应格式 {code, data, message, trace_id}
 //
+// /health 的响应体可直接用导出的 health.HealthResponse 解码：
+// data.status 是整体状态（health.StatusOK / StatusDegraded / StatusError），
+// data.checks 是逐项结果数组（name/status/error）。
+// 消费方不必手写信封结构体去猜内层形态——见 HealthResponse 的 godoc，
+// 其中列出了消费方极易猜错的 4 点。
+//
 // 端点说明:
 //   - /ping: 存活探针，仅返回 200，不做依赖检查（K8s liveness probe）
 //   - /health: 就绪探针，检查所有注册的 Checker（K8s readiness probe）
@@ -36,8 +42,8 @@
 //   - 自定义 Checker: 实现 HealthChecker 函数类型
 //
 // 软依赖降级: Checker 可返回 health.Degraded(err) 标记降级——
-// CheckResult.Status = "degraded"、Error 填充，但 HTTP 仍 200（就绪不失败），
-// data.status 可为 "degraded" 供告警识别，软依赖不可用不会误杀就绪。
+// CheckResult.Status = health.StatusDegraded、Error 填充，但 HTTP 仍 200（就绪不失败），
+// data.status 可为 StatusDegraded 供告警识别，软依赖不可用不会误杀就绪。
 package health
 
 import (
@@ -60,19 +66,26 @@ import (
 
 // HealthChecker 健康检查函数类型。
 // 返回 nil 表示检查通过；返回 error 表示检查失败；
-// 返回 Degraded(err) 表示软依赖降级（HTTP 200，Status="degraded"）。
+// 返回 Degraded(err) 表示软依赖降级（HTTP 200，Status = StatusDegraded）。
 type HealthChecker func(ctx context.Context) error
 
-// CheckResult 单项检查结果
+// CheckResult 单项检查结果。
+//
+// 是 HealthData.Checks 的元素类型，name/status/error 三字段与实际 JSON 逐字段对应：
+//
+//	{"name":"db","status":"ok"}
+//	{"name":"mcp-tools","status":"degraded","error":"check degraded"}
+//
+// 注意单项详情在 error 字段，不在 message（message 是顶层信封消息）。
 type CheckResult struct {
 	Name   string `json:"name"`
-	Status string `json:"status"` // "ok"、"degraded" 或 "error"
+	Status Status `json:"status"` // StatusOK / StatusDegraded / StatusError
 	Error  string `json:"error,omitempty"`
 }
 
 // DegradedError 表示软依赖降级：不影响就绪（HTTP 200），但
-// CheckResult.Status = "degraded"、Error 填充，供告警系统识别。
-// 与硬失败（Status="error" → HTTP 503）区分：软依赖（缓存、旁路服务等）
+// CheckResult.Status = StatusDegraded、Error 填充，供告警系统识别。
+// 与硬失败（Status = StatusError → HTTP 503）区分：软依赖（缓存、旁路服务等）
 // 不可用应保持可见，但不应让就绪探针失败导致实例被摘流。
 type DegradedError struct {
 	// Err 是导致降级的底层错误，经 Unwrap 暴露，可被 errors.Is/As 链识别。
@@ -94,7 +107,7 @@ func (e *DegradedError) Unwrap() error {
 
 // Degraded 将错误标记为软依赖降级。
 // 在 Checker 中返回 health.Degraded(err)，/health 仍 200，
-// 该项 CheckResult.Status = "degraded"（data.status = "degraded" 供告警）。
+// 该项 CheckResult.Status = StatusDegraded（data.status = StatusDegraded 供告警）。
 //
 // 用法:
 //
@@ -205,6 +218,10 @@ func defaultOptions() *Options {
 // response 是 ekit 平台统一响应格式，字段与 middleware.Response 保持一致。
 // 本包属于传输层端点，内联该结构以消除对 middleware 包的反向依赖（review L5），
 // 响应体 JSON 形状不变：{"code":0,"data":...,"message":"...","trace_id":"..."}。
+//
+// 仅 /ping 使用（data 为 null）。/health 使用导出的 HealthResponse，
+// 其 data 是强类型的 HealthData（status + checks）——消费方可直接解码，
+// 不必手写信封结构体，见 response.go。
 type response struct {
 	Code    int    `json:"code"`     // 业务状态码：0=成功，非0=失败
 	Data    any    `json:"data"`     // 业务数据，失败时为 null
@@ -242,30 +259,30 @@ type indexedResult struct {
 // checkResultStatus 判定单项检查结果状态与文案。
 // 返回 (status, errorText)。errorText 按 verbose 决定脱敏或透出。
 // timedOut 仅对硬失败生效：软依赖降级（DegradedError）语义优先，不改判为 timeout。
-func checkResultStatus(err error, timedOut, verbose bool) (status, errText string) {
+func checkResultStatus(err error, timedOut, verbose bool) (status Status, errText string) {
 	if err == nil {
-		return "ok", ""
+		return StatusOK, ""
 	}
 	var deg *DegradedError
 	if errors.As(err, &deg) {
 		if verbose {
-			return "degraded", deg.Error()
+			return StatusDegraded, deg.Error()
 		}
-		return "degraded", "check degraded"
+		return StatusDegraded, "check degraded"
 	}
 	if timedOut {
-		return "error", "timeout"
+		return StatusError, "timeout"
 	}
 	if verbose {
-		return "error", err.Error()
+		return StatusError, err.Error()
 	}
-	return "error", "check failed"
+	return StatusError, "check failed"
 }
 
 // NewHealthHandler 创建就绪探针 handler。
 // 并发执行所有注册的 Checker，结果按注册顺序稳定输出；
 // 全部通过返回 200，任一硬失败返回 503，仅降级（无硬失败）返回 200
-// 且 data.status = "degraded"。适用于 K8s readiness probe。
+// 且 data.status = StatusDegraded。适用于 K8s readiness probe。
 //
 // 检查受 CheckTimeout 总超时约束（默认 3s，可用 WithCheckTimeout 调整）：
 // 超时后立即以已完成的检查结果响应，未完成的标记为 timeout。
@@ -312,7 +329,7 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 				}()
 				status, errText := checkResultStatus(err, runCtx.Err() != nil, verbose)
 				res.Status, res.Error = status, errText
-				if err != nil && status == "error" {
+				if err != nil && status == StatusError {
 					logx.CtxError(runCtx, "health check failed", "name", checker.Name, "err", err)
 				} else if err != nil {
 					logx.CtxWarn(runCtx, "health check degraded", "name", checker.Name, "err", err)
@@ -346,7 +363,7 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 			case <-timer.C:
 				for i := range results {
 					if !filled[i] {
-						results[i] = CheckResult{Name: checkers[i].Name, Status: "error", Error: "timeout"}
+						results[i] = CheckResult{Name: checkers[i].Name, Status: StatusError, Error: "timeout"}
 					}
 				}
 				remaining = 0
@@ -354,35 +371,37 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 		}
 		// 汇总：任一 error → 失败（503）；仅 degraded → 200 且 status=degraded；
 		// 全 ok → 200。degraded 是软依赖降级，就绪不失败，但保持可见供告警。
-		status := "ok"
+		status := StatusOK
 		for i := range results {
 			switch results[i].Status {
-			case "error":
-				status = "error"
-			case "degraded":
-				if status == "ok" {
-					status = "degraded"
+			case StatusError:
+				status = StatusError
+			case StatusDegraded:
+				if status == StatusOK {
+					status = StatusDegraded
 				}
 			}
 		}
 
-		data := map[string]any{
-			"status": status,
-			"checks": results,
+		// 直接用导出的 HealthResponse 写响应：导出面即响应面，
+		// 消费方解码 health.HealthResponse 拿到的是同一份结构（见 response.go）。
+		data := HealthData{
+			Checks: results,
+			Status: status,
 		}
 
-		if status != "error" {
+		if status != StatusError {
 			// ok 与 degraded 都保持就绪（HTTP 200）；degraded 时 data.status
 			// 供告警系统识别软依赖问题，不触发摘流。
 			msg := "success"
-			if status == "degraded" {
+			if status == StatusDegraded {
 				msg = "service degraded"
 			}
-			c.JSON(consts.StatusOK, response{
+			c.JSON(consts.StatusOK, HealthResponse{
 				Code: 0, Data: data, Message: msg, TraceID: traceIDFrom(c),
 			})
 		} else {
-			c.JSON(consts.StatusServiceUnavailable, response{
+			c.JSON(consts.StatusServiceUnavailable, HealthResponse{
 				Code: 503, Data: data, Message: "service unhealthy", TraceID: traceIDFrom(c),
 			})
 			c.Abort()
