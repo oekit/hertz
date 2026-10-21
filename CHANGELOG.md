@@ -2,13 +2,16 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
-## [Unreleased]
+## [v0.8.0] — 2026-10-22
 
 - fix(health): `/health` 响应形态提供导出面——消费方不必手写信封结构体（[#26](https://github.com/oekit/hertz/issues/26)）
   - 新增 `health.HealthResponse`（信封 `{code,data,message,trace_id}`，`data` 强类型）+ `health.HealthData`（`{checks,status}`），消费方可直接 `json.Unmarshal` 到导出类型
   - 新增 `health.Status` 类型与 `StatusOK` / `StatusDegraded` / `StatusError` 常量——比较状态不再硬编码字面量
   - **BREAKING**: `CheckResult.Status` 由 `string` 改为 `health.Status`（底层仍是 `string`）。与字面量比较的调用点不受影响；把 `CheckResult.Status` 赋给 `string` 变量的调用点需显式 `string(...)` 转换
   - 响应体字节不变：`data` 由 `map[string]any` 改为强类型结构，键序与取值与既有响应完全一致
+- build: 测试改用嵌套模块 registry/nacos——registry v0.5.0 起不再提供该子包
+  - 依赖地板：registry v0.4.1 → **v0.5.0**（新增 require `github.com/oekit/registry/nacos v0.1.0`，中接 `registry/nacosimpl v0.1.0`）；logx v0.7.0 → v0.7.1
+  - registry v0.5.0 把 Nacos 客户端门面拆成独立发版的嵌套模块，import 路径不变但「由哪个 module 提供」变了——不补 require 则 `go mod tidy` 认不出提供者
 
 ## [v0.7.1] — 2026-10-19
 
