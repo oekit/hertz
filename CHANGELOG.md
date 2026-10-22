@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.1] — 2026-10-22
+
+- build(deps): logx/hlog 地板 v0.1.1 → v0.1.4（父模块地板与 logx v0.7.1 对齐；零代码改动）
+
 ## [v0.8.0] — 2026-10-22
 
 - fix(health): `/health` 响应形态提供导出面——消费方不必手写信封结构体（[#26](https://github.com/oekit/hertz/issues/26)）
