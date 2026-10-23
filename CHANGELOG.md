@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.2] — 2026-10-24
+
+- fix(bootstrap): RunServer 就绪探活与 h.Run() 并发——此前串行先探活必然 connection refused、探活必超时，h.Run() 根本不被调用、server 从不监听；探活改为并发执行，且只在 engine running 后发起、探活通过后复核 engine 仍在运行（端口被他人占用时不得回调 onReady，避免把不属于自己的实例注册进注册中心）（#43）
+
 ## [v0.8.1] — 2026-10-22
 
 - build(deps): logx/hlog 地板 v0.1.1 → v0.1.4（父模块地板与 logx v0.7.1 对齐；零代码改动）
