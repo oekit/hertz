@@ -274,9 +274,58 @@ func (f *fakeLifecycleApp) RequestShutdown() {
 	f.cancel()
 }
 
-// TestRunServer_ReadyProbePassed 钉住探活通过路径：监听地址可建连后
-// onReady 被执行。
+// TestRunServer_ReadyProbePassed 钉住探活通过路径：**server 自己绑定端口**，
+// 探活通过后 onReady 被执行，且端口确实在监听。
+//
+// #43 补强：本用例此前自己 net.Listen 占住端口再构造 hertz server，于是探活
+// 连的是那个假监听器，而 hertz 真正启动时会因端口被占而失败——测试没有覆盖
+// 「探活目标由 server 自己绑定」这一真实形态（旧实现下该形态必然探活超时、
+// server 根本不启动）。
 func TestRunServer_ReadyProbePassed(t *testing.T) {
+	// 取一个空闲端口后立即释放，交由 hertz server 自己绑定。
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	h := server.New(server.WithHostPorts(addr))
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	RunServer(app, "test-svc", h,
+		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
+		WithReadyProbeTimeout(5*time.Second))
+
+	deadline := time.After(5 * time.Second)
+	for readyCalled.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("onReady not called within deadline")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times, want 1", got)
+	}
+	// 关键断言：server 真的在监听（旧实现下探活超时 → h.Run() 根本不调用）
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		t.Fatalf("server must be listening on %s: %v", addr, err)
+	}
+	_ = conn.Close()
+	if len(app.closers) != 1 || app.closers[0] != "test-svc" {
+		t.Fatalf("closers = %v", app.closers)
+	}
+}
+
+// TestRunServer_ReadyProbe_ForeignListenerNotRegistered 钉住「端口被他人占用」
+// 时不得回调 onReady：探活会连上**对方**的监听器，但本进程的 server 实际
+// 启动失败（netpoll 监听失败直接 panic）——此时回调 onReady 会把不属于自己的
+// 实例注册到注册中心（app.Ready() → NNS 延迟注册）。
+func TestRunServer_ReadyProbe_ForeignListenerNotRegistered(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -291,41 +340,28 @@ func TestRunServer_ReadyProbePassed(t *testing.T) {
 		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
 		WithReadyProbeTimeout(2*time.Second))
 
-	deadline := time.After(3 * time.Second)
-	for readyCalled.Load() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("onReady not called within deadline")
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	if got := readyCalled.Load(); got != 1 {
-		t.Fatalf("onReady called %d times, want 1", got)
-	}
-	if len(app.closers) != 1 || app.closers[0] != "test-svc" {
-		t.Fatalf("closers = %v", app.closers)
+	time.Sleep(1500 * time.Millisecond)
+	if readyCalled.Load() != 0 {
+		t.Fatal("onReady must not fire when our server failed to bind (probe hit a foreign listener)")
 	}
 }
 
-// TestRunServer_ReadyProbeTimeout 钉住探活超时路径：目标不可建连时
+// TestRunServer_ReadyProbeTimeout 钉住探活超时路径：探活目标不可建连时
 // 按启动失败处理（RequestShutdown）。
+//
+// 用 HostPorts("127.0.0.1:0")：server 绑定随机端口正常启动，而探活目标
+// （字面量 127.0.0.1:0）永远不可建连 ⇒ 探活必然超时。
 func TestRunServer_ReadyProbeTimeout(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close() // 得到确定不可建连的地址
-
-	h := server.New(server.WithHostPorts(addr))
+	h := server.New(server.WithHostPorts("127.0.0.1:0"))
 	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
 
 	var readyCalled atomic.Int64
 	RunServer(app, "test-svc", h,
 		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
 		WithReadyProbeTimeout(300*time.Millisecond))
 
-	time.Sleep(600 * time.Millisecond)
+	time.Sleep(900 * time.Millisecond)
 	if readyCalled.Load() != 0 {
 		t.Fatal("onReady should not be called on probe timeout")
 	}

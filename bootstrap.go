@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
 )
@@ -56,10 +57,13 @@ func WithReadyProbeTimeout(d time.Duration) RunServerOption {
 // 该函数会：
 //  1. 通过 app.AddResource 注册 h.Shutdown 作为关闭回调（优雅关闭时自动调用）。
 //  2. 通过 app.GoBackground 在后台启动 h.Run()（阻塞直到 server 退出）。
-//     设置 WithOnReady 时，先循环 TCP dial 探活全部 HostPort（默认超时 5s，
-//     WithReadyProbeTimeout 可调），全部可建连后执行 onReady——hertz 的 OnRun
-//     钩子先于 listenAndServe 执行，无法用作就绪信号，故以探活近似真实就绪
-//     （TCP 可建连 ≠ 业务健康，业务级健康门请配合 hertz/health 检查后再 Ready）。
+//     设置 WithOnReady 时，**探活与 h.Run() 并发**（#43）：监听端口是在
+//     h.Run() 内部（engine.Run → listenAndServe）才绑定的，串行先探活必然
+//     connection refused、探活必超时、server 根本不会启动。探活循环 TCP dial
+//     监听地址（默认超时 5s，WithReadyProbeTimeout 可调），可建连后执行
+//     onReady——hertz 的 OnRun 钩子先于 listenAndServe 执行，无法用作就绪
+//     信号，故以探活近似真实就绪（TCP 可建连 ≠ 业务健康，业务级健康门请配合
+//     hertz/health 检查后再 Ready）。
 //  3. h.Run() 返回 error 或 panic（netpoll 传输层在监听失败如端口占用时
 //     直接 panic 而非返回 error）时调用 app.RequestShutdown() 触发优雅关机，
 //     避免进程无服务地"假活"；探活超时同样触发关机（按启动失败处理）。
@@ -120,12 +124,20 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 			}
 		}()
 		if cfg.onReady != nil {
-			if err := probeAndReady(app, name, h, cfg); err != nil {
-				bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
-					"name", name, "err", err)
-				app.RequestShutdown()
-				return
-			}
+			// 探活必须与 h.Run() **并发**（#43）：监听端口是在 h.Run() 内部
+			// （engine.Run → listenAndServe）才绑定的，先探活后启动必然
+			// connection refused ⇒ 探活必超时 ⇒ server 根本不会启动。
+			// 探活协程只负责「探活 + 回调 onReady + 探活失败则按启动失败关机」，
+			// h.Run() 仍在本 goroutine 内跑（其 panic 由上面的 recover 兜住）。
+			probeCtx, cancelProbe := context.WithCancel(app.Context())
+			defer cancelProbe()
+			async.GoSafe(func() {
+				if err := probeAndReady(probeCtx, app, name, h, cfg); err != nil {
+					bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
+						"name", name, "err", err)
+					app.RequestShutdown()
+				}
+			})
 		}
 		if err := h.Run(); err != nil {
 			bootstrapLog.Error("hertz server stopped with error, requesting shutdown",
@@ -135,8 +147,16 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 	})
 }
 
-// probeAndReady 循环 TCP dial 探活全部 HostPort，全部可建连后执行 onReady。
-func probeAndReady(app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
+// probeAndReady 循环 TCP dial 探活监听地址，可建连后执行 onReady。
+//
+// 两条守则（#43）：
+//   - 只在 engine 进入 running 之后才发起探活：端口绑定前探活必然 refused，
+//     白白重试到超时；
+//   - 探活通过后复核 engine 仍在 running：端口被**他人**占用时，探活连上的
+//     是对方的监听器，而本进程的 server 实际已启动失败（netpoll 监听失败
+//     直接 panic），此时不得回调 onReady —— 否则会把不属于自己的实例
+//     注册到注册中心。
+func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
 	timeout := cfg.probeTimeout
 	if !cfg.probeEnabled {
 		timeout = defaultReadyProbeTimeout
@@ -154,10 +174,25 @@ func probeAndReady(app lifecycle.App, name string, h *server.Hertz, cfg *runServ
 
 	deadline := time.Now().Add(timeout)
 	for {
+		if !h.IsRunning() {
+			// engine 尚未 running（还没走到 listenAndServe）：等它起来再探。
+			if time.Now().After(deadline) {
+				return fmt.Errorf("ready probe timeout after %s, addr=%s: server not running", timeout, addr)
+			}
+			select {
+			case <-ctx.Done():
+				return errors.New("ready probe aborted: app shutting down")
+			case <-time.After(10 * time.Millisecond):
+			}
+			continue
+		}
 		d := net.Dialer{Timeout: 500 * time.Millisecond}
-		conn, err := d.DialContext(app.Context(), "tcp", addr)
+		conn, err := d.DialContext(ctx, "tcp", addr)
 		if err == nil {
 			_ = conn.Close()
+			if !h.IsRunning() {
+				return fmt.Errorf("ready probe connected but server is not running, addr=%s", addr)
+			}
 			bootstrapLog.Info("hertz ready probe passed", "name", name, "addr", addr)
 			cfg.onReady(app.Context())
 			return nil
@@ -166,7 +201,7 @@ func probeAndReady(app lifecycle.App, name string, h *server.Hertz, cfg *runServ
 			return fmt.Errorf("ready probe timeout after %s, addr=%s: %w", timeout, addr, err)
 		}
 		select {
-		case <-app.Context().Done():
+		case <-ctx.Done():
 			return errors.New("ready probe aborted: app shutting down")
 		case <-time.After(100 * time.Millisecond):
 		}
