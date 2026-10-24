@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.3] — 2026-10-24
+
+- fix(bootstrap): RunServer 就绪探活被正常关停打断时误报 ERROR「ready probe failed」——关停与探活失败两种语义未区分；探活侧改为返回可判别哨兵 errProbeAborted，调用侧 errors.Is 命中后只记一条 INFO、不再请求关机（进程本就在关停，再请求是多余动作）；并让关停优先于超时判定——探活超时仍按启动失败处理，既有语义不变（#48）
+
 ## [v0.8.2] — 2026-10-24
 
 - fix(bootstrap): RunServer 就绪探活与 h.Run() 并发——此前串行先探活必然 connection refused、探活必超时，h.Run() 根本不被调用、server 从不监听；探活改为并发执行，且只在 engine running 后发起、探活通过后复核 engine 仍在运行（端口被他人占用时不得回调 onReady，避免把不属于自己的实例注册进注册中心）（#43）
