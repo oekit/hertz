@@ -1,6 +1,6 @@
 # AGENTS.md — oekit/hertz
 
-> Hertz 运行时集成（模块根扁平化）——日志桥接、生命周期、SSE/health/metrics、适配器、OTel、crudh/validatorh（基于 kitx/validator）/versionh（原 handler 微库收编）；RunServer 变参就绪门 WithOnReady（全部 HostPort TCP 探活可建连后回调，探活超时按启动失败优雅关机；缺省超时 5s 经 WithReadyProbeTimeout 调整——探活目标是 server 自动取到的全部 HostPort，**无探活地址覆盖选项**（kitex 侧才有 WithReadyAddr）），配合 bootstrap Ready 实现 NNS 延迟注册；transportx（hertz→core/transport 同构适配器）+ chainmw 桥接
+> Hertz 运行时集成（模块根扁平化）——日志桥接、生命周期、SSE/health/metrics、适配器、OTel、crudh/validatorh（基于 kitx/validator）/versionh（原 handler 微库收编）；RunServer 变参就绪门 WithOnReady（全部 HostPort TCP 探活可建连后回调，探活超时按启动失败优雅关机；**探活被正常关停打断按正常终止处理**——只记 Info、不误报 ERROR、不再请求关机；缺省超时 5s 经 WithReadyProbeTimeout 调整——探活目标是 server 自动取到的全部 HostPort，**无探活地址覆盖选项**（kitex 侧才有 WithReadyAddr）），配合 bootstrap Ready 实现 NNS 延迟注册；transportx（hertz→core/transport 同构适配器）+ chainmw 桥接
 > 当前版本：`v0.8.2` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含

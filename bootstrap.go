@@ -2,7 +2,6 @@ package hertz
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"runtime/debug"
@@ -12,6 +11,7 @@ import (
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
 	"github.com/oekit/logx"
+	"github.com/oekit/pkg/errors"
 )
 
 var bootstrapLog = logx.Delegating("hertz-bootstrap")
@@ -24,6 +24,18 @@ const errEngineNotRunning = "engine is not running"
 
 // defaultReadyProbeTimeout 是 WithOnReady 启用后的默认探活超时。
 const defaultReadyProbeTimeout = 5 * time.Second
+
+// errProbeAborted 是「探活被正常关停打断」的哨兵错误（#48）。
+//
+// 语义拆分：**探活失败**（启动失败 ⇒ 按失败处理、请求关机）与**探活被关停打断**
+// （正常终止 ⇒ 预期路径）是两件事。关停不是失败——调用方用 errors.Is 判定后
+// 只记一条 Info，且不再调 app.RequestShutdown()（进程本就在关停，再请求一次
+// 是多余动作；旧实现把关停记成 ERROR「ready probe failed」，值班的人会误以为
+// 服务启动失败）。
+//
+// 该错误只由 probeAndReady 在 ctx 被取消时返回；探活超时等真正的启动失败
+// 仍返回普通 error。
+var errProbeAborted = errors.New("ready probe aborted: app shutting down")
 
 // RunServerOption 配置 RunServer 的就绪回调行为。
 type RunServerOption func(*runServerConfig)
@@ -67,6 +79,8 @@ func WithReadyProbeTimeout(d time.Duration) RunServerOption {
 //  3. h.Run() 返回 error 或 panic（netpoll 传输层在监听失败如端口占用时
 //     直接 panic 而非返回 error）时调用 app.RequestShutdown() 触发优雅关机，
 //     避免进程无服务地"假活"；探活超时同样触发关机（按启动失败处理）。
+//     **探活被正常关停打断则不触发关机**（#48）：关停是预期路径，只记一条
+//     Info，不误报 ERROR「ready probe failed」。
 //
 // # 关闭语义（对照官方 graceful-shutdown 文档）
 //
@@ -132,11 +146,21 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 			probeCtx, cancelProbe := context.WithCancel(app.Context())
 			defer cancelProbe()
 			async.GoSafe(func() {
-				if err := probeAndReady(probeCtx, app, name, h, cfg); err != nil {
-					bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
-						"name", name, "err", err)
-					app.RequestShutdown()
+				err := probeAndReady(probeCtx, app, name, h, cfg)
+				if err == nil {
+					return
 				}
+				if errors.Is(err, errProbeAborted) {
+					// 正常关停打断探活（#48）：**预期路径，不是探活失败**。
+					// 只记一条 Info，不请求关机——进程正在关停，RequestShutdown
+					// 此刻是多余动作（旧实现此处打 ERROR「ready probe failed，
+					// requesting shutdown」，把关停误报成启动失败）。
+					bootstrapLog.Info("hertz ready probe aborted by shutdown", "name", name)
+					return
+				}
+				bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
+					"name", name, "err", err)
+				app.RequestShutdown()
 			})
 		}
 		if err := h.Run(); err != nil {
@@ -149,13 +173,17 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 
 // probeAndReady 循环 TCP dial 探活监听地址，可建连后执行 onReady。
 //
-// 两条守则（#43）：
+// 三条守则（#43 / #48）：
 //   - 只在 engine 进入 running 之后才发起探活：端口绑定前探活必然 refused，
 //     白白重试到超时；
 //   - 探活通过后复核 engine 仍在 running：端口被**他人**占用时，探活连上的
 //     是对方的监听器，而本进程的 server 实际已启动失败（netpoll 监听失败
 //     直接 panic），此时不得回调 onReady —— 否则会把不属于自己的实例
 //     注册到注册中心。
+//   - **关停优先于超时判定**（#48）：ctx 被取消（正常关停）时返回哨兵
+//     errProbeAborted，而不是「探活超时」——两者在调用方是不同语义（正常终止
+//     vs 启动失败）。每次判定超时前先看 ctx.Err()，避免「关停与超时同时发生」
+//     时把关停误报成启动失败。
 func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
 	timeout := cfg.probeTimeout
 	if !cfg.probeEnabled {
@@ -176,12 +204,15 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 	for {
 		if !h.IsRunning() {
 			// engine 尚未 running（还没走到 listenAndServe）：等它起来再探。
+			if ctx.Err() != nil {
+				return errProbeAborted
+			}
 			if time.Now().After(deadline) {
 				return fmt.Errorf("ready probe timeout after %s, addr=%s: server not running", timeout, addr)
 			}
 			select {
 			case <-ctx.Done():
-				return errors.New("ready probe aborted: app shutting down")
+				return errProbeAborted
 			case <-time.After(10 * time.Millisecond):
 			}
 			continue
@@ -197,12 +228,16 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 			cfg.onReady(app.Context())
 			return nil
 		}
+		// 关停优先于超时：ctx 已取消 ⇒ 探活是被正常关停打断，不是启动失败。
+		if ctx.Err() != nil {
+			return errProbeAborted
+		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("ready probe timeout after %s, addr=%s: %w", timeout, addr, err)
 		}
 		select {
 		case <-ctx.Done():
-			return errors.New("ready probe aborted: app shutting down")
+			return errProbeAborted
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
