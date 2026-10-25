@@ -28,7 +28,7 @@ go get github.com/oekit/hertz@v0.8.4
 | `render` / `adaptor` | `github.com/oekit/hertz/render` 等 | 业务 Render 实现、net/http 互转 |
 | `crudh` / `validatorh` / `versionh` | `github.com/oekit/hertz/crudh` 等 | 泛型 CRUD Handler、参数绑定校验、版本端点 |
 | `governance` | `github.com/oekit/hertz/governance` | 动态限流/超时中间件（包名 `govhertz`） |
-| `clientip` | `github.com/oekit/hertz/clientip` | 可信代理客户端 IP 解析（Hertz 适配）：`GetClientIP(c, trustedProxies)` 把 Hertz 请求适配到 `pkg/convert.ResolveClientIP`——与 net/http 侧同一份采信口径（XFF 从右向左跳过可信代理、伪造值不采信、直连不可信时忽略一切代理头），限流/审计/访问控制三处不再各写一遍 |
+| `clientip` | `github.com/oekit/hertz/clientip` | 可信代理客户端 IP 解析（Hertz 适配）：`GetClientIP(c, trustedProxies)` 把 Hertz 请求适配到 `pkg/convert.ResolveClientIP`——与 net/http 侧同一份采信口径（XFF 从右向左跳过可信代理、伪造值不采信、直连不可信时忽略一切代理头），限流/审计/访问控制三处不再各写一遍；v0.8.5 起**默认不采信 X-Real-IP**（单跳头无法区分「代理写的」与「客户端自带的」，网关默认不写该头但透传客户端自带的 ⇒ 客户端可任意改写自己的客户端 IP，pkg#106），确需采信改用 `GetClientIPWithXRI` / `GetClientIPWithDefaultProxiesAndXRI`；另提供 `GetClientIPWithSet` 走预解析可信代理集合（请求期零 CIDR 解析，pkg#107） |
 | `registry` / `nns` | `github.com/oekit/hertz/registry` 等 | ekit registry / NNS → Hertz 注册发现适配 |
 | `hertzotel` / `hertztracer` | `github.com/oekit/hertz/hertzotel` 等 | OpenTelemetry / OpenTracing 链路 |
 

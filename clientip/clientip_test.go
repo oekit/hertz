@@ -106,11 +106,42 @@ func TestGetClientIP_RealRequest(t *testing.T) {
 	if got := requestIP(t, addr, "9.9.9.9, 1.2.3.4, 127.0.0.1", ""); got != "1.2.3.4" {
 		t.Errorf("clientip = %q, want 1.2.3.4 (rightmost non-trusted XFF; forged 9.9.9.9 ignored)", got)
 	}
-	if got := requestIP(t, addr, "", "5.6.7.8"); got != "5.6.7.8" {
-		t.Errorf("clientip = %q, want 5.6.7.8 (X-Real-IP fallback)", got)
+	// ⚠️ 默认形态**不采信 X-Real-IP**（pkg#106）：单跳头无法区分「代理写的」与
+	// 「客户端自带的」，网关默认透传客户端自带的该头。
+	if got := requestIP(t, addr, "", "5.6.7.8"); got != "127.0.0.1" {
+		t.Errorf("clientip = %q, want 127.0.0.1 (X-Real-IP must not be trusted by default)", got)
 	}
 	if got := requestIP(t, addr, "", ""); got != "127.0.0.1" {
 		t.Errorf("clientip = %q, want 127.0.0.1 (peer address, no proxy headers)", got)
+	}
+}
+
+// TestGetClientIPWithXRI_RealRequest 显式开启后才采信 X-Real-IP。
+func TestGetClientIPWithXRI_RealRequest(t *testing.T) {
+	addr, cleanup := startIPServer(t, func(c *app.RequestContext) string {
+		return GetClientIPWithXRI(c, []string{"127.0.0.0/8"})
+	})
+	defer cleanup()
+
+	if got := requestIP(t, addr, "", "5.6.7.8"); got != "5.6.7.8" {
+		t.Errorf("clientip = %q, want 5.6.7.8 (X-Real-IP honored when explicitly enabled)", got)
+	}
+	// XFF 优先于 X-Real-IP。
+	if got := requestIP(t, addr, "1.2.3.4", "5.6.7.8"); got != "1.2.3.4" {
+		t.Errorf("clientip = %q, want 1.2.3.4 (XFF wins over X-Real-IP)", got)
+	}
+}
+
+// TestGetClientIP_NilContext 的 XRI 变体同样不 panic。
+func TestGetClientIPWithXRI_NilContext(t *testing.T) {
+	if got := GetClientIPWithXRI(nil, nil); got != "" {
+		t.Errorf("GetClientIPWithXRI(nil) = %q, want empty string", got)
+	}
+	if got := GetClientIPWithDefaultProxiesAndXRI(nil); got != "" {
+		t.Errorf("GetClientIPWithDefaultProxiesAndXRI(nil) = %q, want empty string", got)
+	}
+	if got := GetClientIPWithSet(nil, nil); got != "" {
+		t.Errorf("GetClientIPWithSet(nil) = %q, want empty string", got)
 	}
 }
 
