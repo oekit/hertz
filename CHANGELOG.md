@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.4] — 2026-10-25
+
+- feat(clientip): Hertz 侧客户端 IP 解析适配——Hertz 自带的 c.ClientIP() 默认信任任意来源的 X-Forwarded-For，直连方可随意伪造，于是限流/审计/访问控制三处的 IP 口径只能各写一遍；新增 clientip 包，把采信判定交给 pkg/convert.ResolveClientIP（与 net/http 侧同一份实现），Hertz 侧只负责取对端地址与两个代理头；GetClientIP(c, trustedProxies) 按可信代理列表解析、GetClientIPWithDefaultProxies(c) 用 pkg/convert 的默认可信网段；基座依赖地板跟到 pkg v0.25.2（#95）
+
 ## [v0.8.3] — 2026-10-24
 
 - fix(bootstrap): RunServer 就绪探活被正常关停打断时误报 ERROR「ready probe failed」——关停与探活失败两种语义未区分；探活侧改为返回可判别哨兵 errProbeAborted，调用侧 errors.Is 命中后只记一条 INFO、不再请求关机（进程本就在关停，再请求是多余动作）；并让关停优先于超时判定——探活超时仍按启动失败处理，既有语义不变（#48）
