@@ -4,7 +4,7 @@
 > 当前版本：`v0.8.3` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
-`./`、`adaptor/`、`chainmw/`、`crudh/`、`governance/`、`health/`、`health/redischeck/`、`hertzotel/`、`hertztracer/`、`metrics/`、`nns/`、`registry/`、`render/`、`sse/`、`transportx/`、`validatorh/`、`versionh/`
+`./`、`adaptor/`、`chainmw/`、`clientip/`、`crudh/`、`governance/`、`health/`、`health/redischeck/`、`hertzotel/`、`hertztracer/`、`metrics/`、`nns/`、`registry/`、`render/`、`sse/`、`transportx/`、`validatorh/`、`versionh/`
 
 ## 硬规则速览（全矩阵适用）
 
