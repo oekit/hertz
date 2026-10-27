@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.6] — 2026-10-28
+
+- build(deps): 依赖地板对齐 gormx v0.6.0 → v0.6.2，crudh 消费方拿不到 gormx v0.6.2 的 IsUniqueViolation sqlite 分支
+
 ## [v0.8.5] — 2026-10-25
 
 - feat(clientip): 跟随 pkg v0.26.0——**默认不采信 X-Real-IP**（BREAKING）：X-Real-IP 是单跳头，HTTP 头无法区分「代理写的」与「客户端自带的」，网关默认不写该头但原样透传客户端自带的 ⇒ 客户端可任意改写自己的客户端 IP（限流/锁定计数桶被绕过、审计与访问日志来源 IP 可改写，oekit/pkg#106）；GetClientIP / GetClientIPWithDefaultProxies 不再采信该头，确需采信改用新增的 GetClientIPWithXRI / GetClientIPWithDefaultProxiesAndXRI（前置条件：可信代理必须覆写该头）；新增 GetClientIPWithSet 走预解析可信代理集合，请求期不再逐条 ParseCIDR 整份清单（oekit/pkg#107 热路径形态）；基座地板 pkg v0.25.2 → v0.26.0
