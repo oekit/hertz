@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.8] — 2026-10-30
+
+- build: 矩阵内依赖地板 `tracing` v0.3.1 → v0.3.2（维护轮全量对齐；本版不含 API 变更）
+
 ## [v0.8.7] — 2026-10-29
 
 - build: 依赖地板对齐——concurrency 抬到 v0.23.2
