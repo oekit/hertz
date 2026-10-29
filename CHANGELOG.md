@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.7] — 2026-10-29
+
+- build: 依赖地板对齐——concurrency 抬到 v0.23.2
+
 ## [v0.8.6] — 2026-10-28
 
 - build(deps): 依赖地板对齐 gormx v0.6.0 → v0.6.2，crudh 消费方拿不到 gormx v0.6.2 的 IsUniqueViolation sqlite 分支
