@@ -202,8 +202,8 @@ github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLA
 github.com/nyaruka/phonenumbers v1.0.55/go.mod h1:sDaTZ/KPX5f8qyV9qN+hIm+4ZBARJrupC6LuhshJq1U=
 github.com/oekit/bootstrap v0.6.5 h1:zXVd1dOjWU3nr97PxYqHPxq2BBSPx26Bujy5ia0Se6w=
 github.com/oekit/bootstrap v0.6.5/go.mod h1:YkLmN5GnLw8VRrWrAIxSiMAJ3Z8hfaCm4nMI1HxJnL4=
-github.com/oekit/concurrency v0.23.0 h1:drAKrTPrE2gCI7jTZ0d3RVDbex8yfQiLA+EKSb6ppA0=
-github.com/oekit/concurrency v0.23.0/go.mod h1:ht9EmByozS4A4fpEO6O2OSCfMe9/LiBXxL4t9hUb8kM=
+github.com/oekit/concurrency v0.23.1 h1:aW+U6kYBY3hSyrFvjNNecGqUg4RBKSCPc6c5XJ/Kk/0=
+github.com/oekit/concurrency v0.23.1/go.mod h1:ht9EmByozS4A4fpEO6O2OSCfMe9/LiBXxL4t9hUb8kM=
 github.com/oekit/core v0.12.1 h1:RPSr6AdWl3SpFzZ+w2a4C+nhvZr1NSNt8WNjtGotnM0=
 github.com/oekit/core v0.12.1/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
 github.com/oekit/gormx v0.6.4 h1:W8kY/A5ol7c5XnDvISpIRoA1iXjKLgN9lqUftwkjxUM=
@@ -220,8 +220,8 @@ github.com/oekit/middleware v0.13.3 h1:ji8WSPi93eal+E0k11ggGfCFpKKm86nftqHr0cyHn
 github.com/oekit/middleware v0.13.3/go.mod h1:evfsiqAssH8dL7rZShr3PUuLN+uDacPltkBgXyC0Nxw=
 github.com/oekit/nns v0.5.3 h1:ZzNXHY0jDOEbzUWKR/X7fr12eg7tWSXoEf9+lh+lVdY=
 github.com/oekit/nns v0.5.3/go.mod h1:yq9enR3KxiNuMFR8FzTDaqyq4K5mvcyPhUL6RdiHXKM=
-github.com/oekit/pkg v0.30.0 h1:ymAYSqdSYhnrv28yJgnUg1uFQtNisYHjTg855hU2YKo=
-github.com/oekit/pkg v0.30.0/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
+github.com/oekit/pkg v0.31.0 h1:Yn7UUyYQETQQmVdJxQSnsQD7I/gpLIf0k/fr4a8ymuk=
+github.com/oekit/pkg v0.31.0/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
 github.com/oekit/registry v0.5.1 h1:zaDjS1wyyP1aHjXyfch/lZgZB0yvsagYs2AFZqBSYfU=
 github.com/oekit/registry v0.5.1/go.mod h1:mjeRYnq1jhFZjR9jQtB210FMNEP965GrPGH3krJoCtM=
 github.com/oekit/registry/nacos v0.1.0 h1:R7ivXPNAsgRYZFPfyqFS52ZJRpW3gs6pLQWo5DYWT/M=
