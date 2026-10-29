@@ -18,7 +18,7 @@ require (
 	github.com/oekit/pkg v0.31.0
 	github.com/oekit/registry v0.5.1
 	github.com/oekit/registry/nacos v0.1.0
-	github.com/oekit/tracing v0.3.1
+	github.com/oekit/tracing v0.3.2
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
