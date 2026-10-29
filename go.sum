@@ -200,8 +200,8 @@ github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507 h1:f
 github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507/go.mod h1:ygUBdt7eGeYBt6Lz2HO3wx7crKXk25Mp80568emGMWU=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nyaruka/phonenumbers v1.0.55/go.mod h1:sDaTZ/KPX5f8qyV9qN+hIm+4ZBARJrupC6LuhshJq1U=
-github.com/oekit/bootstrap v0.6.5 h1:zXVd1dOjWU3nr97PxYqHPxq2BBSPx26Bujy5ia0Se6w=
-github.com/oekit/bootstrap v0.6.5/go.mod h1:YkLmN5GnLw8VRrWrAIxSiMAJ3Z8hfaCm4nMI1HxJnL4=
+github.com/oekit/bootstrap v0.6.6 h1:bmUvASG6o9WnVGpqSD7tHLPDoFhrW7MpWYwBiAZTLWU=
+github.com/oekit/bootstrap v0.6.6/go.mod h1:ts0GO1fKvzDiFKzpASesSGz2SaESjxM8sUCmAmQSiZ8=
 github.com/oekit/concurrency v0.23.2 h1:1iMfoBe7ti6//IRJoyBlokhUKW0tSEvrQIvb3lEXyvI=
 github.com/oekit/concurrency v0.23.2/go.mod h1:eLMEfucIyKs1cLGK4+lKRQCf3Fgb6EE/mkpPXFMRuMA=
 github.com/oekit/core v0.12.1 h1:RPSr6AdWl3SpFzZ+w2a4C+nhvZr1NSNt8WNjtGotnM0=
@@ -216,8 +216,8 @@ github.com/oekit/logx/hlog v0.1.4 h1:yHGnJl2QKT0eAk5zS095G9HXuNTx6P9Nmei8tUcUGbg
 github.com/oekit/logx/hlog v0.1.4/go.mod h1:3IQsHtPxrB30zjNLHzzzzqWnMMgh+X16qfgVYmrOv7I=
 github.com/oekit/metrics v0.1.10 h1:vOniXexctQBZgDjRWXHo6kYmdmpnmluF+MPmd5a5wYg=
 github.com/oekit/metrics v0.1.10/go.mod h1:r319l1j6E3KCswuHHLCtYUXrQh3N+PxFyi4s8EFy+Ik=
-github.com/oekit/middleware v0.13.3 h1:ji8WSPi93eal+E0k11ggGfCFpKKm86nftqHr0cyHnFw=
-github.com/oekit/middleware v0.13.3/go.mod h1:evfsiqAssH8dL7rZShr3PUuLN+uDacPltkBgXyC0Nxw=
+github.com/oekit/middleware v0.13.4 h1:QFQSAHu12kRco3TIY3RQObTYRy8QSayihPxjCLZonA4=
+github.com/oekit/middleware v0.13.4/go.mod h1:YTwpp+bu9X99a8DTqzQusUGiYPcLmoJ715O1h7yjxDc=
 github.com/oekit/nns v0.5.4 h1:+qFpfYhx1RRLOtkWaa17yncjKq8tgCS8cNuFodA1pE8=
 github.com/oekit/nns v0.5.4/go.mod h1:FlAMhJqJ4DuWRwzym4z62y+rMy1V7MrlLqMl0Hc+o7k=
 github.com/oekit/pkg v0.31.0 h1:Yn7UUyYQETQQmVdJxQSnsQD7I/gpLIf0k/fr4a8ymuk=
