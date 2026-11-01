@@ -206,8 +206,8 @@ github.com/oekit/concurrency v0.23.2 h1:1iMfoBe7ti6//IRJoyBlokhUKW0tSEvrQIvb3lEX
 github.com/oekit/concurrency v0.23.2/go.mod h1:eLMEfucIyKs1cLGK4+lKRQCf3Fgb6EE/mkpPXFMRuMA=
 github.com/oekit/core v0.12.1 h1:RPSr6AdWl3SpFzZ+w2a4C+nhvZr1NSNt8WNjtGotnM0=
 github.com/oekit/core v0.12.1/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
-github.com/oekit/gormx v0.6.4 h1:W8kY/A5ol7c5XnDvISpIRoA1iXjKLgN9lqUftwkjxUM=
-github.com/oekit/gormx v0.6.4/go.mod h1:eGSyo3QIuLF/sjKBNwf1iYPEmN1osC/if5uLt/RotwE=
+github.com/oekit/gormx v0.6.5 h1:moxtVbay0UcNVyaELmeiNZW8LwEr0U3mWhERSCoVcTg=
+github.com/oekit/gormx v0.6.5/go.mod h1:0L7Gfq4rlxVlxFKe4QOYzdewGBbInflLMfTdb3OJkgc=
 github.com/oekit/kitx v0.3.3 h1:qY5xUBuQR2FOarSca/NamxLSm1loLDS7Wgn6iiK6ing=
 github.com/oekit/kitx v0.3.3/go.mod h1:upEeHDaesDBQfYrC3hl+gJCRNYvv6zgrrn6HXD0m7K0=
 github.com/oekit/logx v0.8.0 h1:S0KQOiI6h4GGktsv0fl1KtHBcOGZZgj6M6cUCLRk41E=
@@ -216,10 +216,10 @@ github.com/oekit/logx/hlog v0.1.4 h1:yHGnJl2QKT0eAk5zS095G9HXuNTx6P9Nmei8tUcUGbg
 github.com/oekit/logx/hlog v0.1.4/go.mod h1:3IQsHtPxrB30zjNLHzzzzqWnMMgh+X16qfgVYmrOv7I=
 github.com/oekit/metrics v0.1.10 h1:vOniXexctQBZgDjRWXHo6kYmdmpnmluF+MPmd5a5wYg=
 github.com/oekit/metrics v0.1.10/go.mod h1:r319l1j6E3KCswuHHLCtYUXrQh3N+PxFyi4s8EFy+Ik=
-github.com/oekit/middleware v0.13.4 h1:QFQSAHu12kRco3TIY3RQObTYRy8QSayihPxjCLZonA4=
-github.com/oekit/middleware v0.13.4/go.mod h1:YTwpp+bu9X99a8DTqzQusUGiYPcLmoJ715O1h7yjxDc=
-github.com/oekit/nns v0.5.4 h1:+qFpfYhx1RRLOtkWaa17yncjKq8tgCS8cNuFodA1pE8=
-github.com/oekit/nns v0.5.4/go.mod h1:FlAMhJqJ4DuWRwzym4z62y+rMy1V7MrlLqMl0Hc+o7k=
+github.com/oekit/middleware v0.13.5 h1:vLcKONTZxyk6vKvvKlVYOM39XFcuQhkmn2qHYnISt3g=
+github.com/oekit/middleware v0.13.5/go.mod h1:YTwpp+bu9X99a8DTqzQusUGiYPcLmoJ715O1h7yjxDc=
+github.com/oekit/nns v0.5.5 h1:X8wSQOjmM35seigeaOwLVi2S3H1fhOrr5wHcgIM1TiI=
+github.com/oekit/nns v0.5.5/go.mod h1:FlAMhJqJ4DuWRwzym4z62y+rMy1V7MrlLqMl0Hc+o7k=
 github.com/oekit/pkg v0.31.0 h1:Yn7UUyYQETQQmVdJxQSnsQD7I/gpLIf0k/fr4a8ymuk=
 github.com/oekit/pkg v0.31.0/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
 github.com/oekit/registry v0.5.1 h1:zaDjS1wyyP1aHjXyfch/lZgZB0yvsagYs2AFZqBSYfU=
