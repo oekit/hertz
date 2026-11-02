@@ -60,6 +60,7 @@
 - build: 测试改用嵌套模块 registry/nacos——registry v0.5.0 起不再提供该子包
   - 依赖地板：registry v0.4.1 → **v0.5.0**（新增 require `github.com/oekit/registry/nacos v0.1.0`，中接 `registry/nacosimpl v0.1.0`）；logx v0.7.0 → v0.7.1
   - registry v0.5.0 把 Nacos 客户端门面拆成独立发版的嵌套模块，import 路径不变但「由哪个 module 提供」变了——不补 require 则 `go mod tidy` 认不出提供者
+- 补记：health 软依赖降级与错误脱敏（`Degraded(err)` / `WithVerboseErrors()`）随 v0.5.1 节首发，本版未再改动（#6）
 
 ## [v0.7.1] — 2026-10-19
 
@@ -209,7 +210,7 @@ github.com/oekit/hertz                  # package hertz — RunServer / hlog 桥
 - `RunServer` — 接 bootstrap 生命周期，失败自动 RequestShutdown，容忍双路 Shutdown 竞态
 - `NewLogger` / `hlog` 桥接 — Hertz 框架日志归一到 logx，caller 归属已修正
 - `AddShutdownHook` — 关停前刷数据钩子
-- `health.RegisterHealthRoutes` — /ping、/health、/buildVersion；`Degraded(err)` 软依赖降级；
+- `health.RegisterHealthRoutes` — /ping、/health、/buildVersion；`Degraded(err)` 软依赖降级；（#5）
   `WithVerboseErrors()` 可配置脱敏；空路径跳过注册
 - `sse` — 官方 protocol/sse 并发安全封装 + LastEventID 续传
 - `metrics.InitAndRegister` — Prometheus /metrics（gzip/OpenMetrics 协商透传）
@@ -220,6 +221,7 @@ github.com/oekit/hertz                  # package hertz — RunServer / hlog 桥
 - `registry.NewRegistry` / `NewResolver` / `InstancesToHertz` — ekit registry 适配
 - `nns.NewRegistry` / `NewResolver` / `NewInstanceWatcher` — NNS 适配（含降级链）
 - `hertzotel` / `hertztracer` — server/client 全量 tracing 集成
+- fix(health): Redis 检查器迁至子包 `health/redischeck`（#4）——根包只留 stdlib + hertz 核心，非 Redis 消费方不再被迫引入 go-redis/v9
 
 ### 迁移（从旧路径）
 
