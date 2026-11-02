@@ -220,8 +220,8 @@ github.com/oekit/middleware v0.13.7 h1:VYEYgLmD3FO52j42azPPz4V+vKKn1O4Egs3TySTSl
 github.com/oekit/middleware v0.13.7/go.mod h1:71SMb7iTnEdwoXK0pQw0vMVModPNqJ6dDyWLNjfZIuw=
 github.com/oekit/nns v0.5.6 h1:6NnphYKhrshKGwnmLmU2Wb2YnunN6ckT0gexVeHxWTU=
 github.com/oekit/nns v0.5.6/go.mod h1:uJYG2BCjfflx6eYNoTPRhCJAvWu0rEWqXDwnG89PpPY=
-github.com/oekit/pkg v0.31.1 h1:jDwPFxLBZGDelE09MRnuO5FqCYxvMJA7MPJmVhCXeDc=
-github.com/oekit/pkg v0.31.1/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
+github.com/oekit/pkg v0.31.2 h1:lGxTeyQiBKEZnMkUrUfWpiBPhS7SUCl8H2Fxv1YiWhU=
+github.com/oekit/pkg v0.31.2/go.mod h1:sVeOtmG1sLY2aSnzFIbUAF2Qoh7G8R5vnWtWmLCv8NM=
 github.com/oekit/registry v0.5.1 h1:zaDjS1wyyP1aHjXyfch/lZgZB0yvsagYs2AFZqBSYfU=
 github.com/oekit/registry v0.5.1/go.mod h1:mjeRYnq1jhFZjR9jQtB210FMNEP965GrPGH3krJoCtM=
 github.com/oekit/registry/nacos v0.1.0 h1:R7ivXPNAsgRYZFPfyqFS52ZJRpW3gs6pLQWo5DYWT/M=
