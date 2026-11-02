@@ -200,8 +200,8 @@ github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507 h1:f
 github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507/go.mod h1:ygUBdt7eGeYBt6Lz2HO3wx7crKXk25Mp80568emGMWU=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nyaruka/phonenumbers v1.0.55/go.mod h1:sDaTZ/KPX5f8qyV9qN+hIm+4ZBARJrupC6LuhshJq1U=
-github.com/oekit/bootstrap v0.6.7 h1:2ErnPtthr363/DjG5srkrL1WcfACLjUQGjukbANLlQY=
-github.com/oekit/bootstrap v0.6.7/go.mod h1:ts0GO1fKvzDiFKzpASesSGz2SaESjxM8sUCmAmQSiZ8=
+github.com/oekit/bootstrap v0.6.8 h1:zwlF3I8XyWFBFUugSrV6SZGeVIa9O2Q1SACziz2e7/Y=
+github.com/oekit/bootstrap v0.6.8/go.mod h1:dXP00FI/U76pMLGxEvciTDlLc2pJW3HRk903mVYGqAk=
 github.com/oekit/concurrency v0.23.3 h1:9bpofW5VrMWFXyOCwOie/BxIB6RruBD745IG/OU+IKE=
 github.com/oekit/concurrency v0.23.3/go.mod h1:WsSHSOSeVCwK89//4lqvpy/ZKvxolm2IktV+6lPLjCA=
 github.com/oekit/core v0.12.1 h1:RPSr6AdWl3SpFzZ+w2a4C+nhvZr1NSNt8WNjtGotnM0=
