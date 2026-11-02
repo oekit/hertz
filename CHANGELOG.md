@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.10] — 2026-11-02
+
+- build: 矩阵内依赖地板 `bootstrap` v0.6.6 → v0.6.7、`middleware` v0.13.5 → v0.13.6、`pkg` v0.31.0 → v0.31.1（维护轮全量对齐；本版不含 API 变更）
+
 ## [v0.8.9] — 2026-11-01
 
 - build: 矩阵内依赖地板 `gormx` v0.6.4 → v0.6.5、`middleware` v0.13.4 → v0.13.5、`nns` v0.5.4 → v0.5.5（维护轮全量对齐；本版不含 API 变更）
