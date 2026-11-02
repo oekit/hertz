@@ -11,13 +11,13 @@ require (
 	github.com/oekit/core v0.12.1
 	github.com/oekit/gormx v0.6.6
 	github.com/oekit/kitx v0.3.4
-	github.com/oekit/logx v0.8.0
+	github.com/oekit/logx v0.8.1
 	github.com/oekit/metrics v0.1.10
 	github.com/oekit/middleware v0.13.7
 	github.com/oekit/nns v0.5.6
 	github.com/oekit/pkg v0.31.2
-	github.com/oekit/registry v0.5.1
-	github.com/oekit/registry/nacos v0.1.0
+	github.com/oekit/registry v0.5.2
+	github.com/oekit/registry/nacos v0.1.1
 	github.com/oekit/tracing v0.3.2
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
@@ -32,7 +32,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/hertz-contrib/requestid v1.1.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.1 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.2 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
