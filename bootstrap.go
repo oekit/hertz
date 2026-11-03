@@ -46,9 +46,13 @@ type runServerConfig struct {
 	probeEnabled bool
 }
 
-// WithOnReady 注册就绪回调：TCP 探活通过（全部 HostPort 可建连）后执行，
+// WithOnReady 注册就绪回调：TCP 探活通过（**server 的监听地址**可建连）后执行，
 // 典型用途是触发延迟注册（app.Ready()，配合 bootstrap/nacos v0.3.0）。
 // 设置本选项即默认启用 TCP 探活；未设置时行为与 v0.5.x 一致（无回调无探活）。
+//
+// ⚠️ 探活目标是 **server 的单个监听地址**（hertz v0.10.6 的
+// server.WithHostPorts(hp string) 只存一个地址到 Options.Addr，
+// config.Options 无多地址字段）——不是「全部 HostPort」。
 func WithOnReady(fn func(ctx context.Context)) RunServerOption {
 	return func(cfg *runServerConfig) { cfg.onReady = fn }
 }

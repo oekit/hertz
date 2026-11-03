@@ -9,6 +9,8 @@ package metrics
 import (
 	"context"
 	"net/http"
+	"reflect"
+	"sync"
 
 	"github.com/oekit/metrics"
 
@@ -31,7 +33,7 @@ func MetricsHandler() app.HandlerFunc {
 // 客户端的 Accept-Encoding / Accept 头会透传给 promhttp，
 // 使 gzip 压缩协商与 OpenMetrics 格式协商正常生效。
 func MetricsHandlerFor(gatherer prometheus.Gatherer) app.HandlerFunc {
-	httpHandler := promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+	httpHandler := promHandlerFor(gatherer)
 	return func(ctx context.Context, c *app.RequestContext) {
 		writer := newHertzResponseWriter(c)
 		req, err := http.NewRequestWithContext(ctx, "GET", "/metrics", nil)
@@ -48,6 +50,31 @@ func MetricsHandlerFor(gatherer prometheus.Gatherer) app.HandlerFunc {
 		}
 		httpHandler.ServeHTTP(writer, req)
 	}
+}
+
+// handlerCache 缓存 promhttp handler（按 Gatherer 维度）。
+//
+// promhttp.HandlerFor 每次调用都新建一个 handler（含内容协商闭包）——
+// 每次注册端点/每次调用都重建纯属浪费。缓存后同一 Gatherer 只建一次。
+var handlerCache sync.Map // prometheus.Gatherer → http.Handler
+
+// promHandlerFor 返回（并缓存）指定 Gatherer 对应的 promhttp handler。
+//
+// Gatherer 不可比较时（值类型含 slice/map 等）不能作 map key ⇒ 不缓存，
+// 退化为每次新建（行为与缓存前一致）。
+func promHandlerFor(gatherer prometheus.Gatherer) http.Handler {
+	if gatherer == nil {
+		return nil
+	}
+	if t := reflect.TypeOf(gatherer); t != nil && !t.Comparable() {
+		return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+	}
+	if cached, ok := handlerCache.Load(gatherer); ok {
+		return cached.(http.Handler)
+	}
+	created := promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+	actual, _ := handlerCache.LoadOrStore(gatherer, created)
+	return actual.(http.Handler)
 }
 
 // InitAndRegister 初始化 Prometheus 指标并注册 /metrics 端点。
@@ -96,5 +123,7 @@ func (w *hertzResponseWriter) WriteHeader(statusCode int) {
 	w.c.Response.SetStatusCode(statusCode)
 }
 
-// Flush 实现 http.Flusher 接口，支持 promhttp 流式响应。
-func (w *hertzResponseWriter) Flush() {}
+// ⚠️ 本类型**刻意不实现** http.Flusher：promhttp 的 HandlerFor/HandlerForTransactional
+// 全程不使用 http.Flusher（promhttp/instrument_server 的 delegator 只在底层
+// writer 自身实现 Flusher 时才暴露 Flush），故此前的空 Flush 实现是假接口
+// （声称可流式刷新、实际什么都不做）。去掉后行为不变（响应照常写出）。

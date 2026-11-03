@@ -18,7 +18,8 @@ const resolverErrPrefix = "hertz resolver"
 // 拉取 + 校验 + 错误包装的公共骨架委托给 [sdbridge.ResolverCore]，
 // 本类型只负责 Hertz 服务描述解析、实例类型转换与 discovery.Result 组装。
 type hertzResolver struct {
-	core *sdbridge.ResolverCore
+	core     *sdbridge.ResolverCore
+	fetchErr sdbridge.FetchErrFunc
 }
 
 var _ discovery.Resolver = (*hertzResolver)(nil)
@@ -26,22 +27,37 @@ var _ discovery.Resolver = (*hertzResolver)(nil)
 // ResolverOption 是 [NewResolver] 的配置选项函数类型。
 type ResolverOption func(*hertzResolver)
 
+// WithFetchErr 自定义实例拉取阶段的错误包装格式。
+//
+// fn 为 nil 时忽略（保持缺省 [sdbridge.DiscoverFetchErr]：错误文案为
+// "hertz resolver: discover <svc>: <err>"）。
+func WithFetchErr(fn sdbridge.FetchErrFunc) ResolverOption {
+	return func(r *hertzResolver) {
+		if fn != nil {
+			r.fetchErr = fn
+		}
+	}
+}
+
 // NewResolver 将 ekit [ereg.Discoverer] 适配为 Hertz [discovery.Resolver]。
 //
 // 返回的 Resolver 可通过 [sd.Discovery] 中间件挂载到 Hertz Client：
 //
 //	cli.Use(sd.Discovery(hertz.NewResolver(disc)))
 func NewResolver(disc ereg.Discoverer, opts ...ResolverOption) discovery.Resolver {
+	r := &hertzResolver{
+		fetchErr: sdbridge.DiscoverFetchErr,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(r)
+		}
+	}
 	fetch := func(ctx context.Context, service string) ([]ereg.Instance, error) {
 		return disc.Discover(ctx, service)
 	}
-	r := &hertzResolver{
-		core: sdbridge.NewResolverCore(fetch, resolverName, resolverErrPrefix,
-			sdbridge.WithFetchErr(sdbridge.DiscoverFetchErr)),
-	}
-	for _, opt := range opts {
-		opt(r)
-	}
+	r.core = sdbridge.NewResolverCore(fetch, resolverName, resolverErrPrefix,
+		sdbridge.WithFetchErr(r.fetchErr))
 	return r
 }
 

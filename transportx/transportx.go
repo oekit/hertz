@@ -93,7 +93,9 @@ func (a *replyHeader) Values(key string) []string {
 
 func (a *replyHeader) Set(key, value string) { a.h.Set(key, value) }
 
-func (a *replyHeader) Add(key, value string) { a.h.Set(key, value) }
+// Add 追加（同 key 多值）——与 requestHeader.Add 及 core/transport 的
+// Header.Add 语义一致；此前误用 Set（覆盖），后写的值会顶掉先写的值。
+func (a *replyHeader) Add(key, value string) { a.h.Add(key, value) }
 
 func (a *replyHeader) Del(key string) { a.h.Del(key) }
 

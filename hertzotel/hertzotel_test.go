@@ -7,6 +7,9 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/config"
+	"github.com/cloudwego/hertz/pkg/common/tracer/traceinfo"
+	"github.com/cloudwego/hertz/pkg/route"
 	hertzcontribtracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
 )
 
@@ -92,5 +95,71 @@ func TestNewServerTracing_CanPassToServer(t *testing.T) {
 	h.Use(tracing.Middleware)
 	if h == nil {
 		t.Fatal("server.New returned nil")
+	}
+}
+
+// TestNewServerTracing_InstallsServerTracer 钉住成对组件的 option 把 server
+// tracer 装进 engine——这是 span 的**唯一来源**（上游的 trace carrier 由
+// server tracer 的 Start 放进 ctx，中间件自己装不了）。
+//
+// 回归：只 h.Use(NewServerMiddleware(...)) 而不装 server tracer 时，上游
+// 拿不到 carrier ⇒ 静默不产 span（"配了 tracing 却一条 span 都没有"）。
+func TestNewServerTracing_InstallsServerTracer(t *testing.T) {
+	tracing := NewServerTracing()
+	opts := config.NewOptions(nil)
+	tracing.Option.F(opts)
+	engine := route.NewEngine(opts)
+
+	if !engine.GetTracer().HasTracer() {
+		t.Error("NewServerTracing option must install the server tracer (span source)")
+	}
+}
+
+// TestNewServerMiddleware_WithoutServerTracer_Diagnoses 钉住：engine 未装
+// server tracer 时必须显式诊断（每进程一次），不再静默哑火；
+// 同时链路必须继续（请求仍要有响应）。
+func TestNewServerMiddleware_WithoutServerTracer_Diagnoses(t *testing.T) {
+	var warned int
+	orig := missingServerTracerWarn
+	missingServerTracerWarn = func() { warned++ }
+	defer func() { missingServerTracerWarn = orig }()
+
+	mw := NewServerMiddleware()
+	c := app.NewContext(0)
+	c.Request.SetMethod("GET")
+	called := false
+	c.SetHandlers(app.HandlersChain{func(ctx context.Context, c *app.RequestContext) {
+		called = true
+		c.Next(ctx)
+	}})
+	mw(context.Background(), c)
+
+	if warned == 0 {
+		t.Error("missing server tracer must be diagnosed (no span would be created)")
+	}
+	if !called {
+		t.Error("middleware must continue the handler chain")
+	}
+}
+
+// TestNewServerMiddleware_WithServerTracer_NoDiagnostic 装了 server tracer
+// （ctx 带 traceInfo）时不得报诊断——否则是误报。
+func TestNewServerMiddleware_WithServerTracer_NoDiagnostic(t *testing.T) {
+	var warned int
+	orig := missingServerTracerWarn
+	missingServerTracerWarn = func() { warned++ }
+	defer func() { missingServerTracerWarn = orig }()
+
+	mw := NewServerMiddleware()
+	c := app.NewContext(0)
+	c.Request.SetMethod("GET")
+	c.SetTraceInfo(traceinfo.NewTraceInfo())
+	c.SetHandlers(app.HandlersChain{func(ctx context.Context, c *app.RequestContext) {
+		c.Next(ctx)
+	}})
+	mw(context.Background(), c)
+
+	if warned != 0 {
+		t.Errorf("must not diagnose when a server tracer is installed (warned %d times)", warned)
 	}
 }

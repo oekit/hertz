@@ -23,6 +23,24 @@
 //   - WithRouteTemplate：路由布局模板，子资源/动作端点与标准 CRUD 并存，
 //     可省略个别端点（见 DefaultRoutes）。
 //
+// v0.9.0 的 List/排序缺省口径（BREAKING，均带保留旧行为的开关）：
+//
+//   - 分页有界 + 归一：缺省请求也带 LIMIT（page=1、page_size=20、上限 500，
+//     与 pkg/pagination 口径一致），响应回显的 page/page_size 恒等于 SQL
+//     实际 LIMIT（此前：无分页参数 ⇒ 无 LIMIT ⇒ 全表扫描 + 全量序列化；
+//     page_size 超限时 SQL 封顶 500 而响应回显未归一的原值，前端算出的页数
+//     与实收数据矛盾）。
+//     迁移位：WithPageNormalization(false) 回到 v0.8.14 逐字口径；
+//     WithListParams(false) 的既有契约不变（忽略参数、恒全量、回显 0）。
+//     可配置缺省/上限：WithDefaultPageSize(n) / WithPageSizeLimit(n)。
+//   - 排序列白名单：缺省按实体类型 T 的字段反射生成（字段名/json tag/
+//     gorm column tag，小写匹配）⇒ 白名单外的列返回 400 "invalid sort
+//     parameter"（此前：任意标识符列都进 ORDER BY，列不存在时 DB 报错 ⇒ 5xx）。
+//     迁移位：WithSortValidation(false) 回到 v0.8.14 的「任意标识符列可排序」。
+//
+// 路径参数名：缺省 "id" 不变；未显式设置时按路由模板首个 ":param" 推导
+// （推导不出回退 "id"），显式设置用 WithIDParam(name)。
+//
 // Op 语义扩展点（issue #101）：三处写死的对外语义改为可注入，缺省逐字不变：
 //
 //   - WithQueryBinder / WithListParams：List 查询参数绑定可替换 / 可关

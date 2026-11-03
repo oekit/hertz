@@ -6,13 +6,13 @@ package versionh
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/oekit/core/version"
-	"github.com/oekit/tracing/traceid"
+	mw "github.com/oekit/middleware"
+	"github.com/oekit/middleware/hmw"
 )
 
 // BuildVersionResp 版本信息响应结构，用于 /buildVersion 端点。
@@ -30,15 +30,17 @@ type BuildVersionResp struct {
 // 直接在路由中注册：h.GET("/buildVersion", versionh.Handler)
 func Handler(ctx context.Context, c *app.RequestContext) {
 	uptime := time.Since(version.StartTime).Truncate(time.Second).String()
-	traceID := ""
-	if v, exists := c.Get(traceid.Key); exists {
-		traceID = fmt.Sprintf("%v", v)
-	}
-	c.JSON(consts.StatusOK, map[string]any{
-		"code":     0,
-		"message":  "ok",
-		"trace_id": traceID,
-		"data": BuildVersionResp{
+	// trace_id 取值口径与统一信封一致（hmw.FromRequestContext 读 traceid.Key）。
+	traceID := hmw.FromRequestContext(c)
+	// 信封用统一的 [mw.Response]（键序 code/data/message/trace_id 固定，
+	// 不再手写 map[string]any 的随机键序，调用方无需手写解码）。
+	// ⚠️ 对外 JSON 契约保持不变：message 仍为 "ok"（非 mw.SuccessResp 的
+	// "success"），trace_id 仍取 traceid.Key（与 hmw.FromRequestContext 同源）。
+	c.JSON(consts.StatusOK, mw.Response{
+		Code:    0,
+		Message: "ok",
+		TraceID: traceID,
+		Data: BuildVersionResp{
 			Version:     version.Version,
 			BuildCommit: version.BuildCommit,
 			BuildTime:   version.BuildTime,

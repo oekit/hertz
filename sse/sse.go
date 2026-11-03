@@ -65,6 +65,13 @@ func NewStream(c *app.RequestContext) *Stream {
 //
 // eventType 为 SSE 事件类型（客户端通过 EventSource.addEventListener 监听），
 // data 会被 JSON 序列化为事件数据。data 为 nil 时发送空 data。
+//
+// ⚠️ **空 eventType 的上游行为**（已查证 hertz pkg/protocol/sse）：
+// 上游 Writer.Write 只在 Event.IsSetType() 为真时写 "event:" 行，而
+// IsSetType() 要求类型非空 ⇒ **eventType 为空时事件类型被丢弃**，线上
+// 不会写 "event:" 字段。按 SSE 规范，缺省事件类型即 "message"（浏览器
+// onmessage 收到）——这是规范行为而非缺陷，故本包不兜底改写（改写会变更
+// 线上字节）。需要自定义类型时传非空 eventType。
 func (s *Stream) Send(eventType string, data any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -128,6 +135,10 @@ func (s *Stream) Close() error {
 		return nil
 	}
 	s.closed = true
+	// 零值 Stream（&Stream{}，不经 NewStream 构造）没有底层 writer ⇒
+	// 直接 Close 会空指针 panic。此处保留 nil 守卫：**不是死分支**——
+	// Stream 是导出类型，零值可被外部直接构造（既有测试即如此断言
+	// Close 幂等且不 panic）。对外行为不变。
 	if s.w == nil {
 		return nil
 	}
