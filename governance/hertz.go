@@ -21,6 +21,19 @@ import (
 	"github.com/oekit/core/governance"
 )
 
+// routePath 返回用于治理策略匹配的路径:优先取**路由模板**
+// (如 "/order/:id"),未匹配到路由时回退原始请求路径。
+//
+// 此前用原始路径匹配:带路径参数的路由("/order/123")永远命中不了
+// path 级策略(策略键是模板形态),只落到全局键 ⇒ 参数化路由的治理策略
+// 形同虚设。静态路由的模板与原始路径一致,行为不变。
+func routePath(c *app.RequestContext) string {
+	if p := c.FullPath(); p != "" {
+		return p
+	}
+	return string(c.Path())
+}
+
 // bucket 是极简令牌桶(policy 变化时整体重建,不做原地扩缩)。
 type bucket struct {
 	policy governance.LimiterPolicy
@@ -52,13 +65,15 @@ func (b *bucket) allow(now time.Time) bool {
 // NewLimiterMiddleware 返回动态限流中间件:按 "METHOD:path" → "path" → ""
 // 从 Store 取 LimiterPolicy,超限返 429。策略变化自动重建桶。
 //
+// 路径取**路由模板**(见 [routePath])。
+//
 // 桶按**命中的配置键**分片(而非原始请求路径):精确策略 "POST:/order" 仍按
 // path 独立计数;前缀/全局策略下同组 path 共享一个桶(高基数 path 不会撑爆
 // 桶表,且聚合容量与配置语义一致)。
 func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 	var buckets sync.Map // 命中的配置键 → *bucket
 	return func(ctx context.Context, c *app.RequestContext) {
-		pol, key, ok := store.Load().LookupLimiterKey(string(c.Method()), string(c.Path()))
+		pol, key, ok := store.Load().LookupLimiterKey(string(c.Method()), routePath(c))
 		if !ok {
 			c.Next(ctx)
 			return
@@ -84,9 +99,11 @@ func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 // NewTimeoutMiddleware 返回动态超时中间件:按 "path" → "" 从 Store 取
 // 超时(毫秒),给下游 handler 的 ctx 注入 deadline(ctx 感知的依赖会
 // 提前中止)。到期由下游 ctx 传播体现,本中间件不主动掐断响应。
+//
+// 路径取**路由模板**(见 [routePath])。
 func NewTimeoutMiddleware(store *governance.Store) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
-		if ms, ok := store.Load().LookupTimeout(string(c.Path()), ""); ok && ms > 0 {
+		if ms, ok := store.Load().LookupTimeout(routePath(c), ""); ok && ms > 0 {
 			tctx, cancel := context.WithTimeout(ctx, time.Duration(ms)*time.Millisecond)
 			defer cancel()
 			ctx = tctx

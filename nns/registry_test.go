@@ -1,13 +1,43 @@
 package nns
 
 import (
+	"context"
 	"net"
+	"sync"
 	"testing"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	nnsclient "github.com/oekit/nns/client"
+	ereg "github.com/oekit/registry"
 	registrymocks "github.com/oekit/registry/registrymocks"
 )
+
+// ctxRecordingRegistrar 记录 Register/Deregister 收到的 ctx（钉住 ctx 透传）。
+type ctxRecordingRegistrar struct {
+	mu            sync.Mutex
+	registerCtx   context.Context
+	deregisterCtx context.Context
+}
+
+func (r *ctxRecordingRegistrar) Register(ctx context.Context, _ ereg.Instance) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.registerCtx = ctx
+	return nil
+}
+
+func (r *ctxRecordingRegistrar) Deregister(ctx context.Context, _ ereg.Instance) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deregisterCtx = ctx
+	return nil
+}
+
+func (r *ctxRecordingRegistrar) snapshot() (context.Context, context.Context) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.registerCtx, r.deregisterCtx
+}
 
 // TestNnsRegistry_DeregisterKeepsTagsAndWeight 钉住 nns Deregister
 // 跟 Register 对称:保留 tags 和 defaultWeight 兜底,跟 nns/kitex 行为一致
@@ -88,4 +118,63 @@ func TestRegistry_DegradedRegistrar_Fails(t *testing.T) {
 	if err := r.Deregister(info); err == nil {
 		t.Error("Deregister on degraded (non-mock) client must fail loudly, got nil")
 	}
+}
+
+// TestNewRegistry_NilClientPanics 钉住：nil client 在**构造期** panic
+// （与同包 NewInstanceWatcher 的 nil discoverer 口径一致），不拖到运行期
+// 空指针。
+func TestNewRegistry_NilClientPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewRegistry(nil) must panic (构造期配置错误)")
+		}
+	}()
+	NewRegistry(nil)
+}
+
+// TestRegistry_RegisterContext_PassesCtx 钉住 ctx 透传：此前 Register/
+// Deregister 固定用 context.Background()，调用方的取消/超时丢失。
+// 迁移位：新增 RegisterContext/DeregisterContext（Hertz 的 registry.Registry
+// 接口没有 ctx 形参，故旧签名保留并委托给 ctx 版本）。
+func TestRegistry_RegisterContext_PassesCtx(t *testing.T) {
+	fr := &ctxRecordingRegistrar{}
+	nnsc := nnsclient.New(nnsclient.WithRegistrar(fr))
+	defer nnsc.Close()
+
+	reg := NewRegistry(nnsc)
+
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "v")
+	info := &hregistry.Info{
+		ServiceName: "ctx-svc",
+		Addr:        &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080},
+	}
+
+	if err := reg.RegisterContext(ctx, info); err != nil {
+		t.Fatalf("RegisterContext: %v", err)
+	}
+	if err := reg.DeregisterContext(ctx, info); err != nil {
+		t.Fatalf("DeregisterContext: %v", err)
+	}
+
+	regCtx, deregCtx := fr.snapshot()
+	if regCtx == nil {
+		t.Fatal("RegisterContext must reach the registrar with a ctx")
+	}
+	if got := regCtx.Value(ctxKey{}); got != "v" {
+		t.Errorf("register ctx value = %v, want \"v\"", got)
+	}
+	if deregCtx == nil {
+		t.Fatal("DeregisterContext must reach the registrar with a ctx")
+	}
+	if got := deregCtx.Value(ctxKey{}); got != "v" {
+		t.Errorf("deregister ctx value = %v, want \"v\"", got)
+	}
+}
+
+// TestRegistry_ImplementsContextRegistry 静态断言：Registry 同时满足 hertz
+// 的 registry.Registry 与本包的 ContextRegistry（带 ctx 的扩展点）。
+func TestRegistry_ImplementsContextRegistry(t *testing.T) {
+	var _ hregistry.Registry = (*Registry)(nil)
+	var _ ContextRegistry = (*Registry)(nil)
 }

@@ -2,6 +2,68 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.9.0] — 2026-11-03
+- **crudh 分页契约统一为「有界 + 归一」**（BREAKING）：缺省 List 从「无参 = 全表」改为「page=1、page_size=20、最多 500 条」，且响应的 `page/page_size/pages` 与实际 LIMIT **恒等**
+
+  **为什么 breaking**：此前 `GET {prefix}` 不带 query（或分页参数非正）时
+  `crud.Query.page == nil` ⇒ SQL **无 LIMIT/OFFSET** ⇒ 一次匿名列表请求 = 全表扫描 + 全量序列化；
+  且 `page_size` 未归一（SQL 层封顶 500、响应层回显原值）⇒ **元数据说谎**
+  （请求 `page_size=100000` 实返 500 条，响应却写 `page_size=100000`、`pages≈1` ⇒ 前端算出的页数与实收数据矛盾）。
+  同仓 `validatorh` 早已走 `pagination.Normalize()`（封顶 500）⇒ 两个包口径相反。
+
+  **迁移位**：`WithPageNormalization(false)` 逐字回退 v0.8.14 的分页口径；
+  `WithListParams(false)` 语义**不变**（忽略参数 / 恒全量 / 回显 0）；
+  新增 `WithDefaultPageSize(n)`、`WithPageSizeLimit(n)`。
+
+- **crudh 排序列白名单按实体字段生成**（BREAKING）：未设 `WithSortableColumns` 时从「任意标识符列可排序」改为「只允许实体类型 T 的字段（字段名 / json tag / gorm `column:` tag，小写口径）」，白名单外一律 **400 `invalid sort parameter`**
+
+  **为什么 breaking**：此前缺省只做标识符正则 ⇒ 任意列名进 `ORDER BY`，而列名由 `db.Order(order)`
+  **原文拼进 SQL** ⇒ 列不存在时 DB 报 `no such column` ⇒ 走通用错误出口 ⇒ 客户端拿到 **5xx 而不是 400**
+  （前端拼错列名/驼峰大小写 → 500，运维难定位）。
+  另修一处语义暗坑：「未设置 = 全放开」与「显式空调用 = 全拒绝」两种相反语义不再混同。
+
+  **迁移位**：`WithSortValidation(false)` 恢复「任意标识符列可排序」；
+  列名与字段名/json tag/gorm tag 不一致时（如无 json tag 的 `CreatedAt` → 列 `created_at`）
+  需显式 `WithSortableColumns("created_at")` 补齐。
+
+- **crudh 路径参数名可配置/可推导**（新增，默认行为不变）：新增 `WithIDParam(name)`，
+  也可按 `Route.Path` 首个 `:param` 自动推导（推导不出回退 `"id"`）
+
+  **为什么补**：此前路径参数名**硬编码 `"id"`**，而 `WithRouteTemplate` 允许任意路径
+  ⇒ 注册 `GET /projects/:code` 时端点注册成功、实际永远不可用（string 主键拿到 `""` ⇒ 404；
+  int 主键 `ParseInt("")` 失败 ⇒ 400 `invalid id`）⇒ 真·扩展点缺失。
+
+- **fix(transportx)**：reply header 的 `Add` 误用 `Set`（**覆盖**而非追加）⇒ 与同文件 request header 及 core/transport 的 `Header.Add` 契约不符（补测试覆盖）
+
+- **fix(hertzotel)**：`NewServerMiddleware` 丢弃 `NewServerTracer` 返回的 server option ⇒ span 不生成；
+  现在**显式诊断**（每进程一次）并订正包注释（「只 `h.Use`」不产 span，成对入口是 `NewServerTracing`）
+
+- **fix(governance)**：策略键用 `string(c.Path())`（**原始路径**）⇒ 带路径参数的路由（如 `/order/123`）永远命中不了 path 级策略、只落到全局键 ⇒ 改用**路由模板**（静态路由不变；按具体实例路径配的策略需改到模板键）
+
+- **feat(hertztracer)**：导出裸 `Option struct{}` 且 `NewServerMiddleware(_ ...Option)` **忽略全部参数**（违反 AGENTS.md「禁止裸 Option」，且是无扩展点空壳）⇒ 改为真 Option（`WithTracer` / `WithOperationName`）并新增 `NewServerTracing`；
+  engine 未装 tracer 时中间件自建 span（此前上游 `ServerCtx` 会**中断链路** ⇒ 请求无响应）
+
+- **feat(nns)**：`NewRegistry` 未校验 nil client（同包 `health.go` 对 nil discoverer 明确 panic，口径不一致）⇒ 构造期 panic；
+  新增 `RegisterContext` / `DeregisterContext` 透传 ctx（此前 `Register`/`Deregister` 用 `context.Background()`）
+  ⚠️ `NewRegistry` 返回类型由 `hregistry.Registry` 改为 `*Registry`（仍实现该接口；仅函数值赋值写法会破）
+
+- **feat(registry)**：`ResolverOption` 是**死扩展点**（无任何构造函数，`NewResolver` 的 opts 循环只作用于无可配置字段的 resolver）⇒ 新增 `WithFetchErr`
+
+- **fix(metrics)**：`MetricsHandlerFor` 每次调用新建 `promhttp.HandlerFor`（无缓存）⇒ 按 Gatherer 缓存；
+  删除空实现却自称 `http.Flusher` 的 `Flush()`（已查证 promhttp 全程不用它）
+
+- **refactor(versionh)**：改用 `mw.Response` 统一信封（对外 JSON 逐字不变：键序 / `message:"ok"` / trace_id 来源不变）
+
+- **docs(bootstrap)**：订正注释——hertz v0.10.6 只有**单个**监听地址（`WithHostPorts(hp string)` → `Options.Addr`），
+  原注释称「全部 HostPort 可建连」与实现不符
+
+- **docs(sse)**：登记上游空 eventType 的行为（不写 `event:` 行 ⇒ 按 SSE 规范落到默认 `message`）；
+  `Close()` 的 `s.w == nil` **不是死分支**（`Stream` 是导出类型，`&Stream{}` 零值可被外部直接构造，
+  既有测试依赖 `Close()` 对零值安全）⇒ 保留该守卫并补注释
+
+  **依据**：全部为实测复现（每个修复都有独立反例夹具 + 变异自证：把实现改回旧写法，
+  对应测试**精确转红**，改回来即通过）。gofmt/build/vet/test/-race/golangci-lint（2.14.0，与 CI 同版本）全绿。
+
 ## [v0.8.14] — 2026-11-03
 
 - crudh：补 Op 语义三处残余缺口——List 参数绑定、id 解析失败出口、Delete found 策略与级联钩子（#101）；缺省行为逐字不变

@@ -22,6 +22,20 @@ import (
 	"github.com/oekit/logx"
 )
 
+// TestWithHostPorts_SingleAddress 钉住并登记：hertz v0.10.6 的
+// server.WithHostPorts 只存**一个**地址（config.Options.Addr 单字段，
+// 无多地址支持）⇒ 探活目标就是这一个地址（不是"全部 HostPort"）。
+// bootstrap.go 的相关注释已据此订正。
+func TestWithHostPorts_SingleAddress(t *testing.T) {
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:1111"),
+		server.WithHostPorts("127.0.0.1:2222"),
+	)
+	if got := h.GetOptions().Addr; got != "127.0.0.1:2222" {
+		t.Errorf("addr = %q, want the last WithHostPorts value (single address only)", got)
+	}
+}
+
 func TestRunServer_RegistersShutdownHook(t *testing.T) {
 	mgr := lifecycle.New(100 * time.Millisecond)
 	app := bootstrap.NewApp(mgr)

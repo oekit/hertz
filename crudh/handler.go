@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
@@ -18,11 +19,15 @@ import (
 	"github.com/oekit/hertz/validatorh"
 	mw "github.com/oekit/middleware"
 	"github.com/oekit/pkg/errors"
+	"github.com/oekit/pkg/pagination"
 )
 
 // sortColumnRe 严格匹配 SQL 标识符（字母/下划线开头，仅字母数字下划线）。
 // 排序列名必须通过此校验，杜绝 ORDER BY 注入。
 var sortColumnRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// defaultIDParam 是路径参数的缺省名字（hertz 缺省路由模板用 ":id"）。
+const defaultIDParam = "id"
 
 // Op 标识 Handler 的标准 CRUD 操作。
 // 响应写出钩子（[WithResponseWriter]）按 Op 区分映射策略：
@@ -134,8 +139,25 @@ type Handler[T any, ID comparable, CreateReq, UpdateReq any] struct {
 	// idParser 是路径参数 → ID 的解析函数（WithIDParser 注入）；
 	// nil 时用缺省解析（见 defaultParseID）。
 	idParser func(string) (ID, error)
-	// sortable 是排序白名单（小写列名）；nil 表示仅做标识符格式校验
+	// sortable 是排序白名单（小写列名）；nil 表示按实体类型 T 的字段反射生成
+	// （缺省口径，见 [WithSortableColumns] / [WithSortValidation]）。
 	sortable map[string]struct{}
+	// sortValidation 为 true 时排序列必须命中白名单；false 时只做标识符格式
+	// 校验（全放开，v0.8.14 缺省口径，见 [WithSortValidation]）。
+	sortValidation bool
+	// pageNormalization 为 true 时分页参数归一（v0.9.0 缺省口径：回显的
+	// page/page_size 恒等于 SQL 实际 LIMIT）；false 时保留 v0.8.14 逐字口径
+	// （不归一、缺省不分页，见 [WithPageNormalization]）。
+	pageNormalization bool
+	// defaultPageSize 是 page_size 缺省/非正时生效的每页条数；<=0 用包缺省 20。
+	defaultPageSize int
+	// pageSizeLimit 是每页条数上限；<=0 用包缺省 500。
+	pageSizeLimit int
+	// idParam 是路径参数名（[WithIDParam] 注入或按路由模板推导）；缺省 "id"。
+	idParam string
+	// idParamExplicit 标记 idParam 是否被显式指定（[WithIDParam]）；
+	// 显式指定优先于按路由模板推导。
+	idParamExplicit bool
 	// responseWriter 是成功响应写出钩子（WithResponseWriter 注入）；
 	// nil 时用 mw.SuccessResp（与历史行为一致）。
 	responseWriter ResponseWriter
@@ -173,14 +195,97 @@ func WithIDParser[T any, ID comparable, CreateReq, UpdateReq any](fn func(string
 	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.idParser = fn }
 }
 
-// WithSortableColumns 设置 List 接口排序参数的白名单列名。
-// 未设置时仅做标识符格式校验；设置后白名单外的列名返回 400。
+// WithSortableColumns 设置 List 接口排序参数的白名单列名（列名小写匹配）。
+//
+// v0.9.0 起**未设置时白名单按实体类型 T 的字段反射生成**（字段名/json tag/
+// gorm column tag 的小写形式）——白名单外的列返回 400 "invalid sort parameter"
+// （不再让不存在的列进 ORDER BY 触发 DB 报错 ⇒ 5xx）。
+//
+// 显式设置时以本白名单为准（不再叠加反射结果）。显式空调用
+// （WithSortableColumns()）= 空白名单 = **全部拒绝**（与「未设置」语义相反，
+// 两者不再混同）。需要 v0.8.14 的「任意标识符列均可排序」用
+// [WithSortValidation](false)。
 func WithSortableColumns[T any, ID comparable, CreateReq, UpdateReq any](cols ...string) HandlerOption[T, ID, CreateReq, UpdateReq] {
 	return func(h *Handler[T, ID, CreateReq, UpdateReq]) {
 		h.sortable = make(map[string]struct{}, len(cols))
 		for _, col := range cols {
 			h.sortable[strings.ToLower(col)] = struct{}{}
 		}
+	}
+}
+
+// WithSortValidation 控制排序参数是否做白名单校验（v0.9.0 缺省 = true）。
+//
+// true（缺省）：排序列必须命中白名单——白名单缺省按实体类型 T 的字段反射
+// 生成（见 [WithSortableColumns]），白名单外的列返回 400 "invalid sort parameter"。
+//
+// false：只做标识符格式校验（**全放开**）——v0.8.14 缺省口径（未设
+// [WithSortableColumns] 时任意标识符列都进 ORDER BY，列不存在时 DB 报
+// no such column ⇒ 客户端拿到 5xx 而非 400）。
+//
+// 显式开关取代「不传 = 全放开」的隐式语义；与 [WithSortableColumns] 同时
+// 设置时本开关优先（全放开，白名单不参与校验）。
+func WithSortValidation[T any, ID comparable, CreateReq, UpdateReq any](enabled bool) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.sortValidation = enabled }
+}
+
+// WithDefaultPageSize 设置 List 的缺省每页条数（page_size 缺省/非正时生效）。
+//
+// n > 0 → 使用 n；n <= 0 → 用包缺省 [pagination.DefaultPageSize]（20）。
+// 生效值恒不超过有效上限（[WithPageSizeLimit]）与 [pagination.MaxPageSize]
+// （500）——超过上限的配置按上限生效，保证响应回显与 SQL 实际 LIMIT 恒等。
+//
+// 仅在归一口径下生效（缺省）；[WithPageNormalization](false) 时不生效。
+func WithDefaultPageSize[T any, ID comparable, CreateReq, UpdateReq any](n int) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.defaultPageSize = n }
+}
+
+// WithPageSizeLimit 设置 List 的每页条数上限（page_size 超过即按上限截断）。
+//
+// n > 0 → 上限为 min(n, [pagination.MaxPageSize])；n <= 0 → 用包缺省上限 500。
+//
+// ⚠️ 上限无法突破 500：下游 pkg/pagination 的 PageRequest.Limit() 硬性封顶
+// 500（本仓不升级该依赖），放宽到 500 以上不会被下游兑现——按 500 生效，
+// 保证响应回显与 SQL 实际 LIMIT 恒等。
+//
+// 仅在归一口径下生效（缺省）；[WithPageNormalization](false) 时不生效。
+func WithPageSizeLimit[T any, ID comparable, CreateReq, UpdateReq any](n int) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.pageSizeLimit = n }
+}
+
+// WithPageNormalization 控制分页参数是否归一（v0.9.0 缺省 = true）。
+//
+// true（缺省）：分页参数归一——page 缺省/非正 → 1，page_size 缺省/非正 →
+// 20（或 [WithDefaultPageSize]），上限 500（或 [WithPageSizeLimit]）；
+// **缺省请求也分页**（SQL 带 LIMIT，不再全表扫描），响应回显的
+// page/page_size 恒等于 SQL 实际 LIMIT。
+//
+// false：保留 v0.8.14 逐字口径——不归一（回显原值），且 page/page_size 均
+// 缺省或非正时不分页（SQL 无 LIMIT，恒全量返回）。
+//
+// 注意：与 [WithListParams](false) 不同——后者忽略全部查询参数（连排序一起），
+// 本开关只回退分页归一，排序口径仍由 [WithSortValidation] 决定。
+func WithPageNormalization[T any, ID comparable, CreateReq, UpdateReq any](enabled bool) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.pageNormalization = enabled }
+}
+
+// WithIDParam 设置路径参数名（Get/Update/Delete 读取的 hertz 路由参数名）。
+//
+// 缺省 "id"（与 v0.8.14 逐字一致）；未显式设置时按 [WithRouteTemplate] 的
+// 路径首个 ":param" 推导（推导不出或多条路由参数名不一致时回退 "id"）。
+// 显式设置优先于推导。
+//
+// 用途：路由模板用非 "id" 的参数名（如 "/projects/:code"）时，
+// 缺省实现只读 c.Param("id") ⇒ 取不到值（string 主键拿到空串 ⇒ 404，
+// int 主键解析失败 ⇒ 400），端点「注册成功但永远不可用」。
+func WithIDParam[T any, ID comparable, CreateReq, UpdateReq any](name string) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) {
+		h.idParamExplicit = true
+		if name == "" {
+			h.idParam = defaultIDParam
+			return
+		}
+		h.idParam = name
 	}
 }
 
@@ -272,11 +377,144 @@ func WithDeleteCascade[T any, ID comparable, CreateReq, UpdateReq any](fn func(c
 
 // NewHandler 创建 CRUD Handler。
 func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service[T, ID, CreateReq, UpdateReq], opts ...HandlerOption[T, ID, CreateReq, UpdateReq]) *Handler[T, ID, CreateReq, UpdateReq] {
-	h := &Handler[T, ID, CreateReq, UpdateReq]{svc: svc}
+	h := &Handler[T, ID, CreateReq, UpdateReq]{
+		svc:               svc,
+		sortValidation:    true,
+		pageNormalization: true,
+		idParam:           defaultIDParam,
+	}
 	for _, opt := range opts {
 		opt(h)
 	}
+	// 排序白名单缺省按实体类型 T 的字段反射生成（消费方拿不到实体字段 ⇒
+	// 空集 ⇒ 白名单外的列一律 400）。显式设置过（WithSortableColumns，
+	// 含显式空调用）则保持调用方口径。
+	if h.sortValidation && h.sortable == nil {
+		h.sortable = entityColumns[T]()
+	}
+	// 路径参数名：未显式指定时按路由模板推导（推导不出回退 "id"）。
+	if !h.idParamExplicit {
+		h.idParam = deriveIDParam(h.routes)
+	}
 	return h
+}
+
+// entityColumns 按实体类型 T 的字段反射生成排序列白名单（小写列名）。
+//
+// 候选列名 = 字段名（小写）+ json tag 名（小写）+ gorm tag 的 column 名（小写），
+// 匹配口径与 [WithSortableColumns] 一致（列名小写匹配，不造第二套口径）。
+// 嵌入结构体（匿名字段）的字段递归收集；time.Time 除外（其内部字段不是列）。
+//
+// 实体不是结构体 / 无可用字段 ⇒ 空集（白名单外的列一律 400，fail-closed）。
+func entityColumns[T any]() map[string]struct{} {
+	cols := make(map[string]struct{})
+	collectEntityColumns(reflect.TypeOf((*T)(nil)).Elem(), cols, map[reflect.Type]struct{}{})
+	return cols
+}
+
+// collectEntityColumns 递归收集结构体字段的列名候选（含嵌入结构体）。
+func collectEntityColumns(t reflect.Type, cols map[string]struct{}, seen map[reflect.Type]struct{}) {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	if _, ok := seen[t]; ok {
+		return
+	}
+	seen[t] = struct{}{}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if f.PkgPath != "" {
+			// 非导出字段：不是 DB 列，不进白名单。
+			continue
+		}
+		if f.Anonymous {
+			ft := f.Type
+			for ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
+				collectEntityColumns(ft, cols, seen)
+			}
+		}
+		addColumn(cols, f.Name)
+		if tag, ok := f.Tag.Lookup("json"); ok {
+			name := strings.Split(tag, ",")[0]
+			if name != "" && name != "-" {
+				addColumn(cols, name)
+			}
+		}
+		if tag, ok := f.Tag.Lookup("gorm"); ok {
+			if col := gormColumnTag(tag); col != "" {
+				addColumn(cols, col)
+			}
+		}
+	}
+}
+
+// addColumn 把候选列名按小写口径加入白名单。
+func addColumn(cols map[string]struct{}, name string) {
+	name = strings.ToLower(name)
+	if name == "" {
+		return
+	}
+	cols[name] = struct{}{}
+}
+
+// gormColumnTag 从 gorm tag 中取 column 名（无则空串）。
+// 形如 `gorm:"column:created_at;index"` → "created_at"。
+func gormColumnTag(tag string) string {
+	for _, part := range strings.Split(tag, ";") {
+		part = strings.TrimSpace(part)
+		if rest, ok := strings.CutPrefix(part, "column:"); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// deriveIDParam 按路由模板推导路径参数名：取标准 CRUD 的 Get/Update/Delete
+// 三条路由路径里的首个 ":param"；多条路由参数名一致才采用，否则回退 "id"。
+// 自定义端点（Route.Handler）与 List 路由不参与推导。
+func deriveIDParam(routes []Route) string {
+	if routes == nil {
+		routes = DefaultRoutes()
+	}
+	name := ""
+	for _, r := range routes {
+		switch r.Op {
+		case OpGet, OpUpdate, OpDelete:
+		default:
+			continue
+		}
+		p := firstPathParam(r.Path)
+		if p == "" {
+			continue
+		}
+		if name == "" {
+			name = p
+			continue
+		}
+		if name != p {
+			return defaultIDParam
+		}
+	}
+	if name == "" {
+		return defaultIDParam
+	}
+	return name
+}
+
+// firstPathParam 返回路径里首个 ":param" 段的参数名（无则空串）。
+func firstPathParam(path string) string {
+	for _, seg := range strings.Split(path, "/") {
+		if strings.HasPrefix(seg, ":") && len(seg) > 1 {
+			return seg[1:]
+		}
+	}
+	return ""
 }
 
 // write 成功响应出口：注入 ResponseWriter 时走钩子，否则 mw.SuccessResp（行为不变）。
@@ -344,16 +582,14 @@ func (h *Handler[T, ID, C, U]) BindDefaultQuery(c *app.RequestContext, q *crud.Q
 	if sizeErr != nil && c.Query("page_size") != "" {
 		return badRequest("invalid page_size parameter")
 	}
-	if page > 0 || pageSize > 0 {
-		q.Page(page, pageSize)
-	}
+	h.bindPage(q, page, pageSize)
 
 	// 绑定排序参数：逗号分隔多列，每列 "<column>[ ASC|DESC]"。
 	// 列名经严格标识符正则 + 白名单校验后重建，用户原文不进入 SQL，
 	// 防止 ORDER BY 注入（如 sort=(SELECT CASE WHEN ...)）。
 	if sort := c.Query("sort"); sort != "" {
 		for _, seg := range strings.Split(sort, ",") {
-			order, err := parseSortParam(seg, h.sortable)
+			order, err := parseSortParam(seg, h.sortAllowlist())
 			if err != nil {
 				return badRequest("invalid sort parameter")
 			}
@@ -361,6 +597,66 @@ func (h *Handler[T, ID, C, U]) BindDefaultQuery(c *app.RequestContext, q *crud.Q
 		}
 	}
 	return nil
+}
+
+// bindPage 绑定分页参数到 q。
+//
+// v0.9.0 缺省（pageNormalization=true）：分页参数先归一（页码缺省 1、
+// 每页条数缺省 20、上限 500，与 pkg/pagination 口径一致），再用**归一后的值**
+// 调 q.Page ⇒ 响应回显的 page/page_size 与 SQL 实际 LIMIT 恒等，且缺省
+// 请求也带 LIMIT（不再全表扫描 + 全量序列化）。
+//
+// v0.8.14 逐字口径（pageNormalization=false，WithPageNormalization(false)）：
+// 仅当 page>0 或 page_size>0 时才调 q.Page，且**不归一**（回显原值）。
+func (h *Handler[T, ID, C, U]) bindPage(q *crud.Query, page, pageSize int) {
+	if !h.pageNormalization {
+		if page > 0 || pageSize > 0 {
+			q.Page(page, pageSize)
+		}
+		return
+	}
+	q.Page(h.normalizePage(page), h.normalizePageSize(pageSize))
+}
+
+// normalizePage 归一页码：非正 → 1（与 pagination.DefaultPage 一致）。
+func (h *Handler[T, ID, C, U]) normalizePage(page int) int {
+	if page <= 0 {
+		return pagination.DefaultPage
+	}
+	return page
+}
+
+// normalizePageSize 归一每页条数：非正 → 缺省值（WithDefaultPageSize，
+// 缺省 pagination.DefaultPageSize=20），再按有效上限截断
+// （WithPageSizeLimit，缺省 pagination.MaxPageSize=500）。
+//
+// 归一后的值恒落在 [1, 500]：下游 pkg/pagination 的 PageRequest.Limit()
+// 对该区间是恒等映射（只把 <=0 提到 20、把 >500 截到 500）⇒ 响应回显
+// 与 SQL 实际 LIMIT 恒等。
+func (h *Handler[T, ID, C, U]) normalizePageSize(pageSize int) int {
+	limit := h.pageSizeLimit
+	if limit <= 0 || limit > pagination.MaxPageSize {
+		limit = pagination.MaxPageSize
+	}
+	if pageSize <= 0 {
+		pageSize = h.defaultPageSize
+		if pageSize <= 0 {
+			pageSize = pagination.DefaultPageSize
+		}
+	}
+	if pageSize > limit {
+		pageSize = limit
+	}
+	return pageSize
+}
+
+// sortAllowlist 返回当前生效的排序列白名单；nil 表示不做白名单校验（全放开，
+// 仅标识符格式校验）。见 [WithSortValidation]。
+func (h *Handler[T, ID, C, U]) sortAllowlist() map[string]struct{} {
+	if !h.sortValidation {
+		return nil
+	}
+	return h.sortable
 }
 
 // isNotFoundErr 判断错误是否为「记录不存在」形态：crud.ErrNotFound 哨兵
@@ -528,8 +824,9 @@ func (h *Handler[T, ID, C, U]) opHandler(op Op) app.HandlerFunc {
 }
 
 // parseID 从 URL 参数中解析 ID（WithIDParser 或缺省解析）。
+// 读取的参数名由 [WithIDParam] 指定（缺省 "id"；未显式设置时按路由模板推导）。
 func (h *Handler[T, ID, C, U]) parseID(c *app.RequestContext) (ID, error) {
-	idStr := c.Param("id")
+	idStr := c.Param(h.idParam)
 	if h.idParser != nil {
 		return h.idParser(idStr)
 	}

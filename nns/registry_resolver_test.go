@@ -126,5 +126,5 @@ func TestNewResolver_TargetWithTags(t *testing.T) {
 	}
 }
 
-// TestRegistryImplementsHertzInterface 静态断言：nnsRegistry 实现 hregistry.Registry。
-var _ hregistry.Registry = (*nnsRegistry)(nil)
+// TestRegistryImplementsHertzInterface 静态断言：Registry 实现 hregistry.Registry。
+var _ hregistry.Registry = (*Registry)(nil)

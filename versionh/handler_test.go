@@ -3,6 +3,7 @@ package versionh
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -37,6 +38,28 @@ func TestHandler_Response(t *testing.T) {
 	}
 	if data["uptime"] == nil {
 		t.Error("expected uptime")
+	}
+}
+
+// TestHandler_EnvelopeContractUnchanged 钉住：改用统一信封类型
+// [mw.Response] 后，对外 JSON 契约**逐字不变**——键序 code/data/message/
+// trace_id，message 仍为 "ok"（非 mw.SuccessResp 的 "success"），
+// trace_id 取值来源不变。
+func TestHandler_EnvelopeContractUnchanged(t *testing.T) {
+	version.BuildCommit = "commit-1"
+	version.BuildBranch = "main"
+	version.BuildTime = "2026-01-01"
+
+	c := app.NewContext(128)
+	c.Set("trace_id", "tid-1")
+	Handler(context.Background(), c)
+
+	body := string(c.Response.Body())
+	if !strings.HasPrefix(body, "{\"code\":0,\"data\":{") {
+		t.Errorf("envelope prefix changed: %s", body)
+	}
+	if !strings.HasSuffix(body, "\"message\":\"ok\",\"trace_id\":\"tid-1\"}") {
+		t.Errorf("envelope suffix changed: %s", body)
 	}
 }
 

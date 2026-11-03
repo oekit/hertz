@@ -173,6 +173,27 @@ func TestStream_ConcurrentSendClose_NoRace(t *testing.T) {
 	_ = requestSSE(t, addr)
 }
 
+// TestStream_Send_EmptyEventType_OmitsEventField 钉住（并登记）上游行为：
+// eventType 为空时上游 Writer.Write 不写 "event:" 行（IsSetType 要求非空）
+// ⇒ 事件按 SSE 规范落到默认类型 "message"，而不是变成"无类型事件"。
+// 本包不兜底改写（改写会变更线上字节）。
+func TestStream_Send_EmptyEventType_OmitsEventField(t *testing.T) {
+	addr, cleanup := startSSEServer(t, func(ctx context.Context, c *app.RequestContext) {
+		s := NewStream(c)
+		_ = s.Send("", map[string]int{"percent": 75})
+		_ = s.Close()
+	})
+	defer cleanup()
+
+	body := string(requestSSE(t, addr))
+	if contains(body, "event:") {
+		t.Errorf("empty event type must not emit an event field: %q", body)
+	}
+	if !contains(body, "{\"percent\":75}") {
+		t.Errorf("data missing: %q", body)
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {

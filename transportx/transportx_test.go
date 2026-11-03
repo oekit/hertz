@@ -74,6 +74,33 @@ func TestReplyHeaderWriteBack(t *testing.T) {
 	}
 }
 
+// TestReplyHeaderAdd_Appends 钉住 reply header 的 Add 语义：**追加**而非覆盖。
+//
+// 此前 replyHeader.Add 误用 Set（覆盖）——同 key 多次 Add 只剩最后一个值，
+// 与 requestHeader.Add 及 core/transport 的 Header.Add 契约都不符。
+func TestReplyHeaderAdd_Appends(t *testing.T) {
+	c := newTestRequestContext(t, "h", "/")
+	tr := NewServerTransport(c)
+	reply := tr.ReplyHeader()
+
+	reply.Add("X-Multi", "a")
+	reply.Add("X-Multi", "b")
+	if vs := reply.Values("X-Multi"); len(vs) != 2 || vs[0] != "a" || vs[1] != "b" {
+		t.Fatalf("Add must append, got %v", vs)
+	}
+	if got := c.Response.Header.Peek("X-Multi"); string(got) != "a" {
+		t.Fatalf("response header = %q, want a (first appended value)", got)
+	}
+
+	// Set 仍是单值（覆盖）语义——与 Add 区分开。
+	// 注意：hertz 的 setArg 只替换首个同键值，混用 Add/Set 的结果由 hertz 决定，
+	// 本用例只钉住「Set 不追加」。
+	reply.Set("X-Single", "c")
+	if vs := reply.Values("X-Single"); len(vs) != 1 || vs[0] != "c" {
+		t.Fatalf("Set must overwrite, got %v", vs)
+	}
+}
+
 func TestNewServerContext(t *testing.T) {
 	c := newTestRequestContext(t, "svc.local:8080", "/api/ping")
 	ctx := NewServerContext(context.Background(), c)

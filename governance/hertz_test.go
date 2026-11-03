@@ -13,6 +13,70 @@ import (
 	"github.com/oekit/core/governance"
 )
 
+// TestLimiterMiddleware_RouteTemplatePolicy 钉住：path 级策略按**路由模板**
+// 匹配——参数化路由（/order/:id）此前用原始路径（/order/123）查策略，
+// 永远命中不了 path 级策略（只落到全局键）⇒ 治理策略对参数化路由形同虚设。
+func TestLimiterMiddleware_RouteTemplatePolicy(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"limiter":{"GET:/order/:id":{"rate":1,"burst":1}}}`))
+	store.Update(cfg)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewLimiterMiddleware(store))
+	h.GET("/order/:id", func(_ context.Context, c *app.RequestContext) {
+		c.String(200, "ok")
+	})
+
+	if w := ut.PerformRequest(h.Engine, "GET", "/order/1", nil); w.Code != 200 {
+		t.Fatalf("first request = %d, want 200", w.Code)
+	}
+	if w := ut.PerformRequest(h.Engine, "GET", "/order/2", nil); w.Code != 429 {
+		t.Errorf("second request = %d, want 429 (route-template policy must apply)", w.Code)
+	}
+}
+
+// TestTimeoutMiddleware_RouteTemplatePolicy 同上：超时策略按路由模板匹配。
+func TestTimeoutMiddleware_RouteTemplatePolicy(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"timeout_ms":{"/slow/:id":50}}`))
+	store.Update(cfg)
+
+	var gotDeadline bool
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+	h.GET("/slow/:id", func(ctx context.Context, c *app.RequestContext) {
+		_, gotDeadline = ctx.Deadline()
+		c.Next(ctx)
+	})
+	ut.PerformRequest(h.Engine, "GET", "/slow/1", nil)
+
+	if !gotDeadline {
+		t.Error("timeout policy must match the route template, not the raw path")
+	}
+}
+
+// TestRoutePath_FallsBackToRawPath 未匹配到路由时（无路由模板）回退原始路径，
+// 保持既有行为。
+func TestRoutePath_FallsBackToRawPath(t *testing.T) {
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.GET("/order/:id", func(_ context.Context, c *app.RequestContext) {
+		c.String(200, "ok")
+	})
+	w := ut.PerformRequest(h.Engine, "GET", "/order/42", nil)
+	if w.Code != 200 {
+		t.Fatalf("request = %d, want 200", w.Code)
+	}
+}
+
 // TestLimiterMiddleware_DynamicPolicy 行为级:无配置放行 → 配置限流后超限 429
 // → 策略更新后放行窗口变化(动态收敛的核心价值)。
 func TestLimiterMiddleware_DynamicPolicy(t *testing.T) {
@@ -93,45 +157,6 @@ func TestTimeoutMiddleware_InjectsDeadline(t *testing.T) {
 // TestLimiterMiddleware_ConcurrentUpdateRace 回归：policy 锁外读、锁内写构成
 // data race（流量与 Nacos 配置推送并发时）。钉住：并发 Update + 并发请求下
 // -race 干净。
-func TestLimiterMiddleware_ConcurrentUpdateRace(t *testing.T) {
-	store := governance.NewStore(nil)
-	h := server.New(
-		server.WithHostPorts("127.0.0.1:0"),
-		server.WithDisablePrintRoute(true),
-	)
-	h.Use(NewLimiterMiddleware(store))
-	h.POST("/race", func(_ context.Context, c *app.RequestContext) {
-		c.String(200, "ok")
-	})
-
-	done := make(chan struct{})
-	// 并发配置推送：交替更新策略
-	go func() {
-		defer close(done)
-		for i := 0; i < 50; i++ {
-			cfg, err := governance.Parse([]byte(`{"limiter":{"POST:/race":{"rate":100,"burst":100}}}`))
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			store.Update(cfg)
-		}
-	}()
-	// 并发流量
-	var wg sync.WaitGroup
-	for w := 0; w < 8; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 20; i++ {
-				ut.PerformRequest(h.Engine, "POST", "/race", nil)
-			}
-		}()
-	}
-	wg.Wait()
-	<-done
-}
-
 // TestLimiterMiddleware_GlobalPolicySharedBucket 钉住：前缀/全局策略下按
 // **命中的配置键**分桶——不同 path 共享同一桶，桶表条目数受配置约束，
 // 高基数 path 不会造成无界增长。
@@ -163,4 +188,43 @@ func TestLimiterMiddleware_GlobalPolicySharedBucket(t *testing.T) {
 	if allowed != 2 {
 		t.Errorf("global policy should share one bucket across paths, allowed=%d, want 2", allowed)
 	}
+}
+
+func TestLimiterMiddleware_ConcurrentUpdateRace(t *testing.T) {
+	store := governance.NewStore(nil)
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewLimiterMiddleware(store))
+	h.POST("/race", func(_ context.Context, c *app.RequestContext) {
+		c.String(200, "ok")
+	})
+
+	done := make(chan struct{})
+	// 并发配置推送：交替更新策略
+	go func() {
+		defer close(done)
+		for i := 0; i < 50; i++ {
+			cfg, err := governance.Parse([]byte(`{"limiter":{"POST:/race":{"rate":100,"burst":100}}}`))
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			store.Update(cfg)
+		}
+	}()
+	// 并发流量
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 20; j++ {
+				ut.PerformRequest(h.Engine, "POST", "/race", nil)
+			}
+		}()
+	}
+	wg.Wait()
+	<-done
 }
