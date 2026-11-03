@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/oekit/gormx/crud"
 	"github.com/oekit/hertz/validatorh"
@@ -23,6 +24,82 @@ import (
 // 排序列名必须通过此校验，杜绝 ORDER BY 注入。
 var sortColumnRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// Op 标识 Handler 的标准 CRUD 操作。
+// 响应写出钩子（[WithResponseWriter]）按 Op 区分映射策略：
+// Create/Get/Update 的 data 为实体 *T，List 为 *crud.PageResponse[T]，Delete 为 nil。
+type Op string
+
+// 标准 CRUD 五操作。
+const (
+	OpCreate Op = "create"
+	OpGet    Op = "get"
+	OpList   Op = "list"
+	OpUpdate Op = "update"
+	OpDelete Op = "delete"
+)
+
+// ResponseWriter 是成功响应写出钩子：将 CRUD 数据（见 [Op]）映射为消费方
+// 信封 DTO 并写入响应。缺省为 mw.SuccessResp——统一信封 {code,data,message,trace_id}，
+// 与未配置时逐字一致；消费方可在此换成自有 DTO（如 IDResp{ID} /
+// ListXxxResp{List} / EmptyResp{Success}）与自有信封。
+type ResponseWriter func(ctx context.Context, c *app.RequestContext, op Op, data any)
+
+// ErrMapper 是错误映射钩子：将 crudh/服务层错误映射为消费方码表的 BizError
+// （如 404→40401），再经统一出口 mw.Fail 渲染（HTTP 状态由消费方 StatusMapper
+// 推导）。返回 nil 表示保留原错误。缺省不映射，与未配置时逐字一致。
+type ErrMapper func(err error) error
+
+// Route 是 [WithRouteTemplate] 的模板条目：Method+Path 定位，Op/Handler 二选一
+// 绑定处理函数。子资源/动作端点（Handler）与标准 CRUD（Op）在同一模板内并存，
+// 注册顺序即声明顺序，路由布局完全由消费方决定。
+type Route struct {
+	// Method 是 HTTP 方法（如 consts.MethodPost）。
+	Method string
+	// Path 是相对 RegisterRoutes prefix 的子路径："" 表示 prefix 本身，
+	// 否则必须以 / 开头（如 "/:id"、"/:type/items"、"/cache/refresh"）。
+	Path string
+	// Op 绑定到本 Handler 的标准 CRUD 操作；与 Handler 二选一。
+	Op Op
+	// Handler 是自定义端点（子资源/动作）处理函数；与 Op 二选一。
+	Handler app.HandlerFunc
+}
+
+// validate 校验模板条目，返回非空字符串表示非法原因。
+func (r Route) validate() string {
+	if r.Method == "" {
+		return "empty method"
+	}
+	if r.Path != "" && !strings.HasPrefix(r.Path, "/") {
+		return "path must be empty or start with '/': " + r.Path
+	}
+	hasOp := r.Op != ""
+	hasHandler := r.Handler != nil
+	if hasOp == hasHandler {
+		return "exactly one of Op/Handler must be set"
+	}
+	if hasOp {
+		switch r.Op {
+		case OpCreate, OpGet, OpList, OpUpdate, OpDelete:
+		default:
+			return "unknown op: " + string(r.Op)
+		}
+	}
+	return ""
+}
+
+// DefaultRoutes 返回缺省 5 条 REST 路由模板（未配置 [WithRouteTemplate] 时的
+// 注册布局）：POST/GET prefix、GET/PUT/DELETE prefix/:id。返回值是新副本，
+// 可增删/修改后传给 WithRouteTemplate（如保留标准 CRUD、追加子资源与动作端点）。
+func DefaultRoutes() []Route {
+	return []Route{
+		{Method: consts.MethodPost, Path: "", Op: OpCreate},
+		{Method: consts.MethodGet, Path: "", Op: OpList},
+		{Method: consts.MethodGet, Path: "/:id", Op: OpGet},
+		{Method: consts.MethodPut, Path: "/:id", Op: OpUpdate},
+		{Method: consts.MethodDelete, Path: "/:id", Op: OpDelete},
+	}
+}
+
 // Handler 是通用 CRUD HTTP Handler。
 // ID 为实体主键类型（int64 自增 / string 文本主键等，见 crud.Service），
 // 路径参数经 IDParser 解析为 ID。
@@ -33,6 +110,14 @@ type Handler[T any, ID comparable, CreateReq, UpdateReq any] struct {
 	idParser func(string) (ID, error)
 	// sortable 是排序白名单（小写列名）；nil 表示仅做标识符格式校验
 	sortable map[string]struct{}
+	// responseWriter 是成功响应写出钩子（WithResponseWriter 注入）；
+	// nil 时用 mw.SuccessResp（与历史行为一致）。
+	responseWriter ResponseWriter
+	// errMapper 是错误映射钩子（WithErrMapper 注入）；nil 时不映射。
+	errMapper ErrMapper
+	// routes 是路由模板（WithRouteTemplate 注入）：非 nil 即生效（空=不注册）；
+	// nil 时按 DefaultRoutes() 布局注册。
+	routes []Route
 }
 
 // HandlerOption 是 [NewHandler] 的配置选项。
@@ -59,6 +144,37 @@ func WithSortableColumns[T any, ID comparable, CreateReq, UpdateReq any](cols ..
 	}
 }
 
+// WithResponseWriter 注入成功响应写出钩子（entity/PageResponse → 信封 DTO）。
+// 钩子负责映射并写出完整响应；未注入时用 mw.SuccessResp，与历史行为逐字一致。
+func WithResponseWriter[T any, ID comparable, CreateReq, UpdateReq any](fn ResponseWriter) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.responseWriter = fn }
+}
+
+// WithErrMapper 注入错误映射钩子（crud 错误 → 消费方码表）。
+// 钩子作用于 handler 全部错误出口（服务层错误、绑定校验、路径参数/分页/排序解析），
+// 返回 nil 保留原错误；未注入时不映射，与历史行为逐字一致。
+// 错误渲染仍统一走 mw.Fail（handler 统一错误出口不变）。
+func WithErrMapper[T any, ID comparable, CreateReq, UpdateReq any](fn ErrMapper) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.errMapper = fn }
+}
+
+// WithRouteTemplate 以完整模板替换缺省路由布局（缺省见 [DefaultRoutes]）。
+// 模板逐条注册：Op 绑定标准 CRUD 操作，Handler 挂自定义子资源/动作端点，二者并存；
+// 省略某条即不注册该端点（如「无 GET :id」）。传空模板 = 不注册任何路由
+// （自行注册时抑制缺省布局用）。
+// 模板非法（Method 为空、Path 非 "" 且不以 / 开头、Op/Handler 同缺或同给、
+// Op 非标准五操作）时 panic——属构造期配置错误，启动即暴露。
+func WithRouteTemplate[T any, ID comparable, CreateReq, UpdateReq any](routes ...Route) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	tpl := make([]Route, len(routes))
+	for i, r := range routes {
+		if reason := r.validate(); reason != "" {
+			panic("crudh: invalid route template: " + reason)
+		}
+		tpl[i] = r
+	}
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.routes = tpl }
+}
+
 // NewHandler 创建 CRUD Handler。
 func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service[T, ID, CreateReq, UpdateReq], opts ...HandlerOption[T, ID, CreateReq, UpdateReq]) *Handler[T, ID, CreateReq, UpdateReq] {
 	h := &Handler[T, ID, CreateReq, UpdateReq]{svc: svc}
@@ -68,38 +184,65 @@ func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service
 	return h
 }
 
+// write 成功响应出口：注入 ResponseWriter 时走钩子，否则 mw.SuccessResp（行为不变）。
+func (h *Handler[T, ID, C, U]) write(ctx context.Context, c *app.RequestContext, op Op, data any) {
+	if h.responseWriter != nil {
+		h.responseWriter(ctx, c, op, data)
+		return
+	}
+	mw.SuccessResp(c, data)
+}
+
+// fail 错误统一出口：先经 ErrMapper（若有）映射为消费方码表，再走 mw.Fail。
+func (h *Handler[T, ID, C, U]) fail(ctx context.Context, c *app.RequestContext, err error) {
+	if h.errMapper != nil {
+		if mapped := h.errMapper(err); mapped != nil {
+			err = mapped
+		}
+	}
+	mw.Fail(ctx, c, err)
+}
+
+// badRequest 构造本地参数类错误（id/分页/排序解析失败）。
+// 用 NewBizError(400, ...) 而非 NewBadRequestError：mw.Fail 的 BizError 渲染
+// （HTTPCode=0 经 StatusMapper 推导）与历史 mw.ErrorResp(c, 400, msg) 输出逐字一致。
+func badRequest(msg string) error {
+	return errors.NewBizError(400, msg)
+}
+
 // Create 处理 POST 创建请求。
 func (h *Handler[T, ID, C, U]) Create(ctx context.Context, c *app.RequestContext) {
 	var req C
 	if err := validatorh.BindAndValidate(c, &req); err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
 	entity, err := h.svc.Create(ctx, &req)
 	if err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
-	mw.SuccessResp(c, entity)
+	h.write(ctx, c, OpCreate, entity)
 }
 
 // Get 处理 GET 单个获取请求。
 func (h *Handler[T, ID, C, U]) Get(ctx context.Context, c *app.RequestContext) {
 	id, err := h.parseID(c)
 	if err != nil {
-		mw.ErrorResp(c, 400, "invalid id")
+		// 固定文案 "invalid id" 为历史对外契约（不透出解析细节），保持逐字不变。
+		h.fail(ctx, c, badRequest("invalid id"))
 		return
 	}
 
 	entity, err := h.svc.Get(ctx, id)
 	if err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
-	mw.SuccessResp(c, entity)
+	h.write(ctx, c, OpGet, entity)
 }
 
 // List 处理 GET 列表查询请求（带分页）。
@@ -110,11 +253,11 @@ func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) 
 	page, pageErr := strconv.Atoi(c.Query("page"))
 	pageSize, sizeErr := strconv.Atoi(c.Query("page_size"))
 	if pageErr != nil && c.Query("page") != "" {
-		mw.ErrorResp(c, 400, "invalid page parameter")
+		h.fail(ctx, c, badRequest("invalid page parameter"))
 		return
 	}
 	if sizeErr != nil && c.Query("page_size") != "" {
-		mw.ErrorResp(c, 400, "invalid page_size parameter")
+		h.fail(ctx, c, badRequest("invalid page_size parameter"))
 		return
 	}
 	if page > 0 || pageSize > 0 {
@@ -128,7 +271,7 @@ func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) 
 		for _, seg := range strings.Split(sort, ",") {
 			order, err := parseSortParam(seg, h.sortable)
 			if err != nil {
-				mw.ErrorResp(c, 400, "invalid sort parameter")
+				h.fail(ctx, c, badRequest("invalid sort parameter"))
 				return
 			}
 			q.Order(order)
@@ -137,59 +280,86 @@ func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) 
 
 	resp, err := h.svc.List(ctx, q)
 	if err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
-	mw.SuccessResp(c, resp)
+	h.write(ctx, c, OpList, resp)
 }
 
 // Update 处理 PUT 更新请求。
 func (h *Handler[T, ID, C, U]) Update(ctx context.Context, c *app.RequestContext) {
 	id, err := h.parseID(c)
 	if err != nil {
-		mw.ErrorResp(c, 400, "invalid id")
+		h.fail(ctx, c, badRequest("invalid id"))
 		return
 	}
 
 	var req U
 	if err = validatorh.BindAndValidate(c, &req); err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
 	entity, err := h.svc.Update(ctx, id, &req)
 	if err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
-	mw.SuccessResp(c, entity)
+	h.write(ctx, c, OpUpdate, entity)
 }
 
 // Delete 处理 DELETE 删除请求。
 func (h *Handler[T, ID, C, U]) Delete(ctx context.Context, c *app.RequestContext) {
 	id, err := h.parseID(c)
 	if err != nil {
-		mw.ErrorResp(c, 400, "invalid id")
+		h.fail(ctx, c, badRequest("invalid id"))
 		return
 	}
 
 	if err := h.svc.Delete(ctx, id); err != nil {
-		mw.Fail(ctx, c, err)
+		h.fail(ctx, c, err)
 		return
 	}
 
-	mw.SuccessResp(c, nil)
+	h.write(ctx, c, OpDelete, nil)
 }
 
 // RegisterRoutes 注册 CRUD 路由到 Hertz Group。
+// 未配置 WithRouteTemplate 时按 [DefaultRoutes] 布局注册 5 条 REST：
+// POST/GET prefix、GET/PUT/DELETE prefix/:id；配置后按模板逐条注册——
+// 子资源/动作端点与标准 CRUD 并存，省略某条即不注册该端点。
 func (h *Handler[T, ID, C, U]) RegisterRoutes(rg *route.RouterGroup, prefix string) {
-	rg.POST(prefix, h.Create)
-	rg.GET(prefix, h.List)
-	rg.GET(prefix+"/:id", h.Get)
-	rg.PUT(prefix+"/:id", h.Update)
-	rg.DELETE(prefix+"/:id", h.Delete)
+	routes := h.routes
+	if routes == nil {
+		routes = DefaultRoutes()
+	}
+	for _, r := range routes {
+		if r.Handler != nil {
+			rg.Handle(r.Method, prefix+r.Path, r.Handler)
+			continue
+		}
+		rg.Handle(r.Method, prefix+r.Path, h.opHandler(r.Op))
+	}
+}
+
+// opHandler 返回 Op 对应的标准 CRUD 处理函数；未知 Op panic
+// （模板在 WithRouteTemplate 已校验，此处为防御性兜底）。
+func (h *Handler[T, ID, C, U]) opHandler(op Op) app.HandlerFunc {
+	switch op {
+	case OpCreate:
+		return h.Create
+	case OpGet:
+		return h.Get
+	case OpList:
+		return h.List
+	case OpUpdate:
+		return h.Update
+	case OpDelete:
+		return h.Delete
+	}
+	panic("crudh: unknown op: " + string(op))
 }
 
 // parseID 从 URL 参数中解析 ID（WithIDParser 或缺省解析）。
