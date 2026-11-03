@@ -2,6 +2,12 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.13] — 2026-11-03
+
+- feat(crudh): 响应信封/错误码/路由布局三类可注入 Option（WithResponseWriter/WithErrMapper/WithRouteTemplate）——缺省行为逐字不变（#94）
+
+关联问题单：hertz#94。
+
 ## [v0.8.12] — 2026-11-02
 
 - 抬嵌套模块地板：github.com/oekit/registry/nacosimpl v0.1.0 → v0.1.1、github.com/oekit/logx/hlog v0.1.4 → v0.1.6（oekit/oekit#104）
