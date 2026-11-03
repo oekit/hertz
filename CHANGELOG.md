@@ -2,6 +2,12 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.8.14] — 2026-11-03
+
+- crudh：补 Op 语义三处残余缺口——List 参数绑定、id 解析失败出口、Delete found 策略与级联钩子（#101）；缺省行为逐字不变
+
+关联问题单：hertz#101。
+
 ## [v0.8.13] — 2026-11-03
 
 - feat(crudh): 响应信封/错误码/路由布局三类可注入 Option（WithResponseWriter/WithErrMapper/WithRouteTemplate）——缺省行为逐字不变（#94）
