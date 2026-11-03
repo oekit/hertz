@@ -12,7 +12,7 @@ require (
 	github.com/oekit/gormx v0.7.0
 	github.com/oekit/kitx v0.3.4
 	github.com/oekit/logx v0.8.2
-	github.com/oekit/metrics v0.1.10
+	github.com/oekit/metrics v0.1.11
 	github.com/oekit/middleware v0.13.8
 	github.com/oekit/nns v0.5.7
 	github.com/oekit/pkg v0.33.0
