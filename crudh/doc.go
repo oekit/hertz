@@ -22,4 +22,13 @@
 //     渲染仍统一走 mw.Fail；
 //   - WithRouteTemplate：路由布局模板，子资源/动作端点与标准 CRUD 并存，
 //     可省略个别端点（见 DefaultRoutes）。
+//
+// Op 语义扩展点（issue #101）：三处写死的对外语义改为可注入，缺省逐字不变：
+//
+//   - WithQueryBinder / WithListParams：List 查询参数绑定可替换 / 可关
+//     （关掉后忽略 page/page_size/sort，恒全量返回，对齐存量 IDL 契约）；
+//   - WithIDParseErrorHandler：路径参数解析失败的出口可定制（IDParseErrorPassthrough
+//     让解析器自带错误即出口，映射交 WithErrMapper）；
+//   - WithDeleteFoundPolicy / WithDeleteCascade：Delete 的 found 口径可配
+//     （missing→success / →not-found）+ 级联钩子（跨实体级联删除）。
 package crudh

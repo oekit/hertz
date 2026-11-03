@@ -49,6 +49,32 @@ type ResponseWriter func(ctx context.Context, c *app.RequestContext, op Op, data
 // 推导）。返回 nil 表示保留原错误。缺省不映射，与未配置时逐字一致。
 type ErrMapper func(err error) error
 
+// QueryBinder 是 List 查询参数绑定钩子：把请求查询参数绑定到 crud.Query。
+// 返回 error 表示绑定失败（handler 统一错误出口 mw.Fail 渲染）；返回 nil 继续查询。
+// 缺省绑定（page/page_size/sort，非法值 400）见 [Handler.BindDefaultQuery]。
+type QueryBinder func(ctx context.Context, c *app.RequestContext, q *crud.Query) error
+
+// IDParseErrorHandler 是路径参数解析失败的出口钩子：把解析错误转换为对外错误。
+// 缺省出口为 BizError(400, "invalid id")（历史对外契约，不透出解析细节）。
+type IDParseErrorHandler func(ctx context.Context, c *app.RequestContext, err error) error
+
+// IDParseErrorPassthrough 是「解析器自带错误即出口」的现成实现：原样返回解析错误，
+// 由 [WithErrMapper] 映射进消费方码表（如自有绑定错误码 40001）。
+func IDParseErrorPassthrough(_ context.Context, _ *app.RequestContext, err error) error {
+	return err
+}
+
+// DeleteFoundPolicy 是 Delete 的 found 口径策略（记录不存在时的对外形态）。
+type DeleteFoundPolicy int
+
+const (
+	// DeleteFoundNotFound：记录不存在 → not-found 错误（缺省，与历史一致）。
+	DeleteFoundNotFound DeleteFoundPolicy = iota
+	// DeleteFoundSuccess：记录不存在 → 视为删除成功（幂等口径，如存量
+	// DeleteDictItem「删不存在 = 200」契约）。
+	DeleteFoundSuccess
+)
+
 // Route 是 [WithRouteTemplate] 的模板条目：Method+Path 定位，Op/Handler 二选一
 // 绑定处理函数。子资源/动作端点（Handler）与标准 CRUD（Op）在同一模板内并存，
 // 注册顺序即声明顺序，路由布局完全由消费方决定。
@@ -118,6 +144,20 @@ type Handler[T any, ID comparable, CreateReq, UpdateReq any] struct {
 	// routes 是路由模板（WithRouteTemplate 注入）：非 nil 即生效（空=不注册）；
 	// nil 时按 DefaultRoutes() 布局注册。
 	routes []Route
+	// queryBinder 是 List 查询参数绑定钩子（WithQueryBinder 注入）；
+	// nil 时按 listParamsDisabled 与缺省绑定处理。
+	queryBinder QueryBinder
+	// listParamsDisabled 为 true 时 List 不绑定任何查询参数
+	// （WithListParams(false)；存量 IDL 契约：忽略分页/排序参数、恒全量返回）。
+	listParamsDisabled bool
+	// idParseErrHandler 是路径参数解析失败的出口钩子（WithIDParseErrorHandler 注入）；
+	// nil 时用缺省出口 badRequest("invalid id")。
+	idParseErrHandler IDParseErrorHandler
+	// deleteFoundPolicy 是 Delete 的 found 口径（WithDeleteFoundPolicy 注入）；
+	// 零值 = DeleteFoundNotFound（缺省）。
+	deleteFoundPolicy DeleteFoundPolicy
+	// deleteCascade 是删除级联钩子（WithDeleteCascade 注入）；nil 时无级联。
+	deleteCascade func(ctx context.Context, c *app.RequestContext, id ID, del func(context.Context) error) error
 }
 
 // HandlerOption 是 [NewHandler] 的配置选项。
@@ -175,6 +215,61 @@ func WithRouteTemplate[T any, ID comparable, CreateReq, UpdateReq any](routes ..
 	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.routes = tpl }
 }
 
+// WithQueryBinder 注入 List 查询参数绑定钩子（替换缺省绑定）。
+//
+// 钩子拿到 crud.Query 与请求上下文，自行绑定分页/排序/过滤条件；注入后缺省绑定
+// （page/page_size/sort，非法值 400）不再执行——自定义钩子全权接管。
+// 需要保留缺省口径（分页 + 排序白名单）再加自定义过滤时，在钩子内调用
+// [Handler.BindDefaultQuery]。
+// 钩子返回 error 表示绑定失败，经 handler 统一错误出口 mw.Fail 渲染。
+// 未注入时按 [WithListParams] 与缺省绑定处理。
+func WithQueryBinder[T any, ID comparable, CreateReq, UpdateReq any](fn QueryBinder) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.queryBinder = fn }
+}
+
+// WithListParams 控制 List 是否绑定缺省查询参数（page/page_size/sort）。
+//
+// 传 false → 完全忽略查询参数：不分页、不排序，非法值（如 page=x）也不再 400，
+// 恒全量返回——对齐存量 IDL BindAndValidate 契约（忽略这些参数、恒全量返回）。
+// 缺省（未设置）= 绑定，行为与历史逐字一致。
+// 与 [WithQueryBinder] 同时设置时以自定义钩子为准（钩子全权接管绑定）。
+func WithListParams[T any, ID comparable, CreateReq, UpdateReq any](enabled bool) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.listParamsDisabled = !enabled }
+}
+
+// WithIDParseErrorHandler 注入路径参数解析失败的出口钩子。
+//
+// 钩子拿到解析错误（WithIDParser 注入的解析函数返回的错误，或缺省解析的错误），
+// 返回对外错误；返回 nil → 回退缺省出口 BizError(400, "invalid id")（不吞错误）。
+// 出口错误仍经 [WithErrMapper] 映射进消费方码表。
+// 未注入时为缺省出口，与历史输出逐字一致。
+func WithIDParseErrorHandler[T any, ID comparable, CreateReq, UpdateReq any](fn IDParseErrorHandler) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.idParseErrHandler = fn }
+}
+
+// WithDeleteFoundPolicy 配置 Delete 的 found 口径（记录不存在时的对外形态）。
+//
+// 缺省 [DeleteFoundNotFound]：记录不存在 → not-found 错误（与历史一致）。
+// [DeleteFoundSuccess]：记录不存在 → 视为删除成功（幂等删除，200）。
+// 两种口径都只作用于「记录不存在」形态的错误，其他错误（如 500）照常失败。
+func WithDeleteFoundPolicy[T any, ID comparable, CreateReq, UpdateReq any](policy DeleteFoundPolicy) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.deleteFoundPolicy = policy }
+}
+
+// WithDeleteCascade 注入删除级联钩子（跨实体级联删除）。
+//
+// 钩子签名 fn(ctx, c, id, del)：
+//   - del 是主记录删除执行器（内部走 svc.Delete），钩子可调用它决定删除时机；
+//   - 钩子返回 error → 删除中止（主记录不删），错误经统一出口 mw.Fail 渲染；
+//   - 钩子返回 nil 且未调用 del → handler 随后执行主记录删除（前置级联语义）。
+//
+// 事务语义：crudh 层不持有数据源，跨实体级联的原子性由消费方保证——需要
+// 「从属记录 + 主记录同事务」时，在钩子内开事务并把事务句柄经 ctx 传给 del
+// （消费方自定 ctx 约定），del 即在该事务内执行。
+func WithDeleteCascade[T any, ID comparable, CreateReq, UpdateReq any](fn func(ctx context.Context, c *app.RequestContext, id ID, del func(context.Context) error) error) HandlerOption[T, ID, CreateReq, UpdateReq] {
+	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.deleteCascade = fn }
+}
+
 // NewHandler 创建 CRUD Handler。
 func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service[T, ID, CreateReq, UpdateReq], opts ...HandlerOption[T, ID, CreateReq, UpdateReq]) *Handler[T, ID, CreateReq, UpdateReq] {
 	h := &Handler[T, ID, CreateReq, UpdateReq]{svc: svc}
@@ -210,6 +305,80 @@ func badRequest(msg string) error {
 	return errors.NewBizError(400, msg)
 }
 
+// idParseError 路径参数解析失败的出口：注入 [IDParseErrorHandler] 时用钩子给出的
+// 错误（钩子返回 nil 则回退缺省，不吞错误），否则用缺省 badRequest("invalid id")
+// ——固定文案为历史对外契约（不透出解析细节），保持逐字不变。
+func (h *Handler[T, ID, C, U]) idParseError(ctx context.Context, c *app.RequestContext, err error) error {
+	if h.idParseErrHandler != nil {
+		if out := h.idParseErrHandler(ctx, c, err); out != nil {
+			return out
+		}
+	}
+	return badRequest("invalid id")
+}
+
+// bindQuery 绑定 List 查询参数：自定义 [QueryBinder] 优先（钩子全权接管绑定，
+// 缺省绑定不执行）；否则按 listParamsDisabled 决定是否走缺省绑定。
+func (h *Handler[T, ID, C, U]) bindQuery(ctx context.Context, c *app.RequestContext, q *crud.Query) error {
+	if h.queryBinder != nil {
+		return h.queryBinder(ctx, c, q)
+	}
+	if h.listParamsDisabled {
+		return nil
+	}
+	return h.BindDefaultQuery(c, q)
+}
+
+// BindDefaultQuery 把缺省查询参数（page/page_size/sort）绑定到 q。
+//
+// 供自定义 [QueryBinder] 复用缺省绑定口径（分页 + 排序白名单校验）：钩子内先调
+// 本方法再叠加自定义条件，即可「保留缺省分页排序 + 增加自定义过滤」。
+// 非法值返回 400 语义的 badRequest 错误（与缺省绑定逐字一致）。
+func (h *Handler[T, ID, C, U]) BindDefaultQuery(c *app.RequestContext, q *crud.Query) error {
+	// 绑定分页参数（无效值返回 400）
+	page, pageErr := strconv.Atoi(c.Query("page"))
+	pageSize, sizeErr := strconv.Atoi(c.Query("page_size"))
+	if pageErr != nil && c.Query("page") != "" {
+		return badRequest("invalid page parameter")
+	}
+	if sizeErr != nil && c.Query("page_size") != "" {
+		return badRequest("invalid page_size parameter")
+	}
+	if page > 0 || pageSize > 0 {
+		q.Page(page, pageSize)
+	}
+
+	// 绑定排序参数：逗号分隔多列，每列 "<column>[ ASC|DESC]"。
+	// 列名经严格标识符正则 + 白名单校验后重建，用户原文不进入 SQL，
+	// 防止 ORDER BY 注入（如 sort=(SELECT CASE WHEN ...)）。
+	if sort := c.Query("sort"); sort != "" {
+		for _, seg := range strings.Split(sort, ",") {
+			order, err := parseSortParam(seg, h.sortable)
+			if err != nil {
+				return badRequest("invalid sort parameter")
+			}
+			q.Order(order)
+		}
+	}
+	return nil
+}
+
+// isNotFoundErr 判断错误是否为「记录不存在」形态：crud.ErrNotFound 哨兵
+// （errors.Is 链判定，含 crud.BaseService 的 not-found 包装）或 404 业务码
+// （BizCode / HTTPCode 任一为 404）。
+func isNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, crud.ErrNotFound) {
+		return true
+	}
+	if be, ok := errors.AsBizError(err); ok && be != nil {
+		return be.BizCode == 404 || be.HTTPCode == 404
+	}
+	return false
+}
+
 // Create 处理 POST 创建请求。
 func (h *Handler[T, ID, C, U]) Create(ctx context.Context, c *app.RequestContext) {
 	var req C
@@ -231,8 +400,7 @@ func (h *Handler[T, ID, C, U]) Create(ctx context.Context, c *app.RequestContext
 func (h *Handler[T, ID, C, U]) Get(ctx context.Context, c *app.RequestContext) {
 	id, err := h.parseID(c)
 	if err != nil {
-		// 固定文案 "invalid id" 为历史对外契约（不透出解析细节），保持逐字不变。
-		h.fail(ctx, c, badRequest("invalid id"))
+		h.fail(ctx, c, h.idParseError(ctx, c, err))
 		return
 	}
 
@@ -249,33 +417,10 @@ func (h *Handler[T, ID, C, U]) Get(ctx context.Context, c *app.RequestContext) {
 func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) {
 	q := crud.NewQuery()
 
-	// 绑定分页参数（无效值返回 400）
-	page, pageErr := strconv.Atoi(c.Query("page"))
-	pageSize, sizeErr := strconv.Atoi(c.Query("page_size"))
-	if pageErr != nil && c.Query("page") != "" {
-		h.fail(ctx, c, badRequest("invalid page parameter"))
+	// 绑定查询参数：自定义 QueryBinder 优先，其次缺省绑定开关，最后缺省绑定。
+	if bindErr := h.bindQuery(ctx, c, q); bindErr != nil {
+		h.fail(ctx, c, bindErr)
 		return
-	}
-	if sizeErr != nil && c.Query("page_size") != "" {
-		h.fail(ctx, c, badRequest("invalid page_size parameter"))
-		return
-	}
-	if page > 0 || pageSize > 0 {
-		q.Page(page, pageSize)
-	}
-
-	// 绑定排序参数：逗号分隔多列，每列 "<column>[ ASC|DESC]"。
-	// 列名经严格标识符正则 + 白名单校验后重建，用户原文不进入 SQL，
-	// 防止 ORDER BY 注入（如 sort=(SELECT CASE WHEN ...)）。
-	if sort := c.Query("sort"); sort != "" {
-		for _, seg := range strings.Split(sort, ",") {
-			order, err := parseSortParam(seg, h.sortable)
-			if err != nil {
-				h.fail(ctx, c, badRequest("invalid sort parameter"))
-				return
-			}
-			q.Order(order)
-		}
 	}
 
 	resp, err := h.svc.List(ctx, q)
@@ -291,7 +436,7 @@ func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) 
 func (h *Handler[T, ID, C, U]) Update(ctx context.Context, c *app.RequestContext) {
 	id, err := h.parseID(c)
 	if err != nil {
-		h.fail(ctx, c, badRequest("invalid id"))
+		h.fail(ctx, c, h.idParseError(ctx, c, err))
 		return
 	}
 
@@ -314,12 +459,32 @@ func (h *Handler[T, ID, C, U]) Update(ctx context.Context, c *app.RequestContext
 func (h *Handler[T, ID, C, U]) Delete(ctx context.Context, c *app.RequestContext) {
 	id, err := h.parseID(c)
 	if err != nil {
-		h.fail(ctx, c, badRequest("invalid id"))
+		h.fail(ctx, c, h.idParseError(ctx, c, err))
 		return
 	}
 
-	if err := h.svc.Delete(ctx, id); err != nil {
-		h.fail(ctx, c, err)
+	// del 是主记录删除执行器：级联钩子可调用它决定删除时机（可在消费方事务内调用）。
+	delCalled := false
+	del := func(dctx context.Context) error {
+		delCalled = true
+		return h.svc.Delete(dctx, id)
+	}
+
+	var deleteErr error
+	if h.deleteCascade != nil {
+		deleteErr = h.deleteCascade(ctx, c, id, del)
+	}
+	if deleteErr == nil && !delCalled {
+		deleteErr = del(ctx)
+	}
+
+	if deleteErr != nil {
+		// 幂等口径：记录不存在按成功处理（存量 DeleteDictItem「删不存在 = 200」）。
+		if h.deleteFoundPolicy == DeleteFoundSuccess && isNotFoundErr(deleteErr) {
+			h.write(ctx, c, OpDelete, nil)
+			return
+		}
+		h.fail(ctx, c, deleteErr)
 		return
 	}
 
