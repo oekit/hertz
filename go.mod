@@ -15,7 +15,7 @@ require (
 	github.com/oekit/metrics v0.1.10
 	github.com/oekit/middleware v0.13.7
 	github.com/oekit/nns v0.5.6
-	github.com/oekit/pkg v0.31.2
+	github.com/oekit/pkg v0.32.0
 	github.com/oekit/registry v0.5.3
 	github.com/oekit/registry/nacos v0.1.3
 	github.com/oekit/tracing v0.3.2
