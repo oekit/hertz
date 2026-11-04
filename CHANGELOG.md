@@ -2,6 +2,10 @@
 
 所有 notable 变更记录如下。格式参考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [v0.9.1] — 2026-11-04
+
+- build: 矩阵内依赖地板 `gormx` v0.7.1 → v0.8.0（源仓 gormx v0.8.0 把纯 Go sqlite 入口移出根包、拆 opt-in 子包 `gormx/sqlitedrv`，源仓 oekit/gormx#72；本仓未引用该入口，除依赖版本外无 API 变更）
+
 ## [v0.9.0] — 2026-11-03
 - **crudh 分页契约统一为「有界 + 归一」**（BREAKING）：缺省 List 从「无参 = 全表」改为「page=1、page_size=20、最多 500 条」，且响应的 `page/page_size/pages` 与实际 LIMIT **恒等**
 
