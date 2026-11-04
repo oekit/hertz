@@ -23,6 +23,7 @@ require (
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
+	google.golang.org/genproto v0.0.0-20261026165753-2ffab32bce7e
 )
 
 require (
@@ -35,7 +36,6 @@ require (
 	github.com/oekit/registry/nacosimpl v0.1.4 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
-	google.golang.org/genproto v0.0.0-20261026165753-2ffab32bce7e // indirect
 )
 
 require (
