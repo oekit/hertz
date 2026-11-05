@@ -9,7 +9,7 @@ require (
 	github.com/oekit/bootstrap v0.6.9
 	github.com/oekit/concurrency v0.25.1
 	github.com/oekit/core v0.12.2
-	github.com/oekit/gormx v0.11.1
+	github.com/oekit/gormx v0.11.2
 	github.com/oekit/kitx v0.4.0
 	github.com/oekit/logx v0.8.3
 	github.com/oekit/metrics v0.1.12
@@ -17,8 +17,8 @@ require (
 	github.com/oekit/nns v0.5.8
 	github.com/oekit/pkg v0.34.1
 	github.com/oekit/registry v0.5.4
-	github.com/oekit/registry/nacos v0.1.4
-	github.com/oekit/tracing v0.3.2
+	github.com/oekit/registry/nacos v0.1.5
+	github.com/oekit/tracing v0.3.3
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -33,7 +33,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/hertz-contrib/requestid v1.1.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.5 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.6 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
@@ -84,7 +84,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507 // indirect
-	github.com/oekit/logx/hlog v0.1.8
+	github.com/oekit/logx/hlog v0.1.9
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
