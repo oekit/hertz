@@ -1,3 +1,7 @@
+## [v0.9.3] — 2026-11-06
+
+- build: 矩阵依赖地板对齐（维护轮 #233）
+
 ## [v0.9.2] — 2026-11-05
 
 - build: genproto 撞包加固（[#109](https://github.com/oekit/hertz/issues/109)）——旧单体 `google.golang.org/genproto`（2019-08，经 tjfoc/gmsm → grpc v1.31.0 的 go.mod 图边入选 module graph）仍含 `googleapis/rpc/status`，与分裂模块 `genproto/googleapis/rpc` 撞包：go1.27 工具链的包装载对图内多提供者的判定不同，`nns` 包在 go1.27 下 setup 阶段报 ambiguous import（go1.26 CI 绿，纯属工具链兼容面问题，go1.27 消费方 import `oekit/hertz/nns` 即撞）。主 go.mod 显式 require 新单体 genproto（2026-10，googleapis/rpc 已拆走）⇒ MVS 选中新单体、旧单体不再提供该包，歧义永久消失；同期 `genproto/googleapis/rpc` 跟随升到 2026-10-19。显式 require 需要 import 边才能在 `go mod tidy` 下存活（tidy 会剪掉无人 import 的 require）——以 `//go:build tools` 标签的 tools.go 提供「只被 tidy 看见、不被正常编译」的钉版 import 边（指向新单体的纯别名占位包 protobuf/field_mask，零新依赖）。验证：go1.27.3 与 GOTOOLCHAIN=go1.26.9 双工具链 `go test ./...` 全绿（18 包，含 nns）；`go mod tidy` 幂等（二次 tidy 零 diff）
