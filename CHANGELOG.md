@@ -1,3 +1,31 @@
+## [v0.10.0] — 2026-11-07
+
+### Added（adaptor）
+- **feat(adaptor)**：`NativeStaticSPAHandler`——SPA（history 路由）静态托管。
+  前端构建产物的路由由 JS 掌管，服务器不认识 `/orders/42` 这类路径：直接静态托管
+  会把用户刷新页面变成 404，于是**每个 embed 前端都要自己重写一遍「miss 就发
+  index.html」+ 一张 MIME 表 + 一套缓存策略**（`NativeStaticFSHandler` 的
+  「不写死 Cache-Control」原则在 SPA 场景恰好不适用）。本函数把这套收进 adaptor
+  （[#112](https://github.com/oekit/hertz/issues/112)）
+  - **回退判据四条**（全部不满足才回退）：① 仅 `GET`/`HEAD`；② 不在
+    `WithSPASkipPrefix` 列出的前缀下；③ 请求路径末段**不带扩展名**——带扩展名
+    视为「要一个具体文件」，miss 就 **404**（旧 hash 资源被回退成 HTML 会让浏览器
+    报 MIME 错，甚至把 HTML 当 JS 缓存）；④ 路径合法（穿越/非法即 404）
+  - **缓存双档**：`WithSPAImmutablePrefix` 列出的前缀（默认 `assets/`）回
+    `public, max-age=31536000, immutable`；入口文件与其余路径回 `no-cache`。
+    安全缺省——入口 HTML 被长缓存就是「发版后白屏」的经典事故形态
+  - **构造期校验**：入口文件（默认 `index.html`，`WithSPAIndex` 可改）在
+    `NewServer` 阶段就 `fs.Stat` 校验，缺失即 panic，错误里带 fsys 根的前 5 个
+    条目并点出 `fs.Sub` 层级写错这一头号成因（否则表现为「路由走了、回退成功、
+    回一个 404 页面」）
+  - 逃生口：`WithSPAServeDottedPaths`（带点的前端路由，如 `/release/v1.2`）；
+    `WithSPASkipPrefix` 可累加多次（`api/`、`debug/` 这类前缀不该被回退成 HTML）
+  - 复用既有 `WithNativeCacheControl` / `WithNativeHeader`；`NativeStaticFSHandler`
+    行为逐字不变（本版把 MIME 分发、路径解析、HEAD 无体等共用件抽成
+    `newNativeStaticConfig` / `resolveNativeStaticPath` / `serveNativeFile`，
+    避免 SPA 变体复制一份 MIME 表——复制正是 issue 抱怨的根源）
+  - 命名取舍：issue 建议 `WithSPAAPIPrefix`，本版取 `WithSPASkipPrefix`——
+    判据是「这些前缀不回退」这一机制语义，`API` 只是最常见的使用场景
 ## [v0.9.6] — 2026-11-06
 
 - build: 矩阵依赖地板对齐（第二轮发版后置·收敛圈）
