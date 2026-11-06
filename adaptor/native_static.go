@@ -36,68 +36,100 @@ import (
 //
 // prefix 与路由参数 filepath 拼接后在 fsys 内查找（"/static" + "/css/a.css"
 // → 查 "css/a.css"）。若 fsys 根下仍带同名目录，可继续传带目录的 FS。
+//
+// 前端单页应用（history 路由）用 NativeStaticSPAHandler：它在本 handler 的基础上
+// 加「miss → 回退 index.html」与 immutable/no-cache 双档缓存。
 func NativeStaticFSHandler(prefix string, fsys fs.FS, opts ...NativeStaticOption) app.HandlerFunc {
+	cfg := newNativeStaticConfig(prefix, opts...)
+	return func(ctx context.Context, c *app.RequestContext) {
+		name, ok := resolveNativeStaticPath(c, cfg)
+		if !ok || name == "" {
+			notFound(c)
+			return
+		}
+		data, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			notFound(c)
+			return
+		}
+		serveNativeFile(c, name, data, cfg.cacheControl, cfg.extraHeaders)
+	}
+}
+
+// newNativeStaticConfig 归一化配置：选项按调用顺序套用，nil 选项跳过。
+func newNativeStaticConfig(prefix string, opts ...NativeStaticOption) nativeStaticConfig {
 	cfg := nativeStaticConfig{prefix: strings.Trim(prefix, "/")}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
 		}
 	}
-	return func(ctx context.Context, c *app.RequestContext) {
-		name := strings.TrimPrefix(string(c.Path()), "/"+cfg.prefix)
-		name = strings.TrimPrefix(name, "/")
-		// *filepath 通配可能拿到 "css/a.css" 或 "/css/a.css"
-		if name == "" {
-			notFound(c)
-			return
-		}
-		// 与 net/http.FileServer 一致：清理后拒绝穿越
-		name = path.Clean("/" + name)
-		name = strings.TrimPrefix(name, "/")
-		if name == "" || name == "." || !fs.ValidPath(name) {
-			notFound(c)
-			return
-		}
+	return cfg
+}
 
-		data, err := fs.ReadFile(fsys, name)
-		if err != nil {
-			notFound(c)
-			return
-		}
-
-		ctype := mime.TypeByExtension(path.Ext(name))
-		if ctype == "" {
-			ctype = "application/octet-stream"
-		}
-		c.SetContentType(ctype)
-		if cfg.cacheControl != "" {
-			c.Header("Cache-Control", cfg.cacheControl)
-		}
-		if cfg.extraHeaders != nil {
-			for k, v := range cfg.extraHeaders {
-				c.Header(k, v)
-			}
-		}
-		if string(c.Method()) == http.MethodHead {
-			c.SetStatusCode(http.StatusOK)
-			return
-		}
-		c.SetStatusCode(http.StatusOK)
-		// c.Write 直接进响应缓冲，不经 net/http adaptor
-		_, _ = c.Write(data)
+// resolveNativeStaticPath 把请求路径折算成 fsys 内的相对路径。
+//
+// ok=false 表示路径非法（穿越/空段/非规范形态）；name 可能为空串，含义是
+// **fsys 根**——普通静态 handler 视为 miss（根不是文件），SPA handler 视为
+// 「交给 index」。两者对空串的态度不同，故由调用方判。
+func resolveNativeStaticPath(c *app.RequestContext, cfg nativeStaticConfig) (string, bool) {
+	name := strings.TrimPrefix(string(c.Path()), "/"+cfg.prefix)
+	name = strings.TrimPrefix(name, "/")
+	if name == "" {
+		return "", true
 	}
+	// 与 net/http.FileServer 一致：清理后拒绝穿越
+	name = path.Clean("/" + name)
+	name = strings.TrimPrefix(name, "/")
+	if name == "" || name == "." || !fs.ValidPath(name) {
+		return "", false
+	}
+	return name, true
+}
+
+// serveNativeFile 写响应：Content-Type 由扩展名推导，缓存与自定义头由调用方给。
+//
+// 静态托管最容易漏的是 HEAD——只回头不回体，否则 HEAD 请求会带一整份文件。
+func serveNativeFile(c *app.RequestContext, name string, data []byte, cacheControl string, extraHeaders map[string]string) {
+	ctype := mime.TypeByExtension(path.Ext(name))
+	if ctype == "" {
+		ctype = "application/octet-stream"
+	}
+	c.SetContentType(ctype)
+	if cacheControl != "" {
+		c.Header("Cache-Control", cacheControl)
+	}
+	for k, v := range extraHeaders {
+		c.Header(k, v)
+	}
+	c.SetStatusCode(http.StatusOK)
+	if string(c.Method()) == http.MethodHead {
+		return
+	}
+	// c.Write 直接进响应缓冲，不经 net/http adaptor
+	_, _ = c.Write(data)
 }
 
 type nativeStaticConfig struct {
 	prefix       string
 	cacheControl string
 	extraHeaders map[string]string
+
+	// SPA 形态专用（NativeStaticFSHandler 不读这些字段）。
+	spaIndex          string
+	spaImmutable      []string
+	spaImmutableCache string
+	spaSkip           []string
+	spaServeDotted    bool
 }
 
-// NativeStaticOption 配置 NativeStaticFSHandler。
+// NativeStaticOption 配置 NativeStaticFSHandler / NativeStaticSPAHandler。
 type NativeStaticOption func(*nativeStaticConfig)
 
 // WithNativeCacheControl 设置 Cache-Control 响应头。默认不发送——缓存策略归调用方。
+//
+// SPA 变体里它是**非 immutable 文件**（含 index.html）那一档的值；未设置时
+// SPA 变体缺省 no-cache。
 func WithNativeCacheControl(v string) NativeStaticOption {
 	return func(c *nativeStaticConfig) { c.cacheControl = v }
 }
