@@ -10,15 +10,15 @@ require (
 	github.com/oekit/concurrency v0.25.1
 	github.com/oekit/core v0.12.2
 	github.com/oekit/gormx v0.11.2
-	github.com/oekit/kitx v0.4.0
-	github.com/oekit/logx v0.8.3
-	github.com/oekit/metrics v0.1.12
+	github.com/oekit/kitx v0.4.1
+	github.com/oekit/logx v0.8.4
+	github.com/oekit/metrics v0.1.13
 	github.com/oekit/middleware v0.13.11
-	github.com/oekit/nns v0.5.8
-	github.com/oekit/pkg v0.35.0
+	github.com/oekit/nns v0.5.9
+	github.com/oekit/pkg v0.35.1
 	github.com/oekit/registry v0.5.4
-	github.com/oekit/registry/nacos v0.1.5
-	github.com/oekit/tracing v0.3.3
+	github.com/oekit/registry/nacos v0.1.7
+	github.com/oekit/tracing v0.3.4
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -33,7 +33,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/hertz-contrib/requestid v1.1.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.6 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.7 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
