@@ -6,7 +6,7 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/bootstrap v0.6.12
+	github.com/oekit/bootstrap v0.6.13
 	github.com/oekit/concurrency v0.25.1
 	github.com/oekit/core v0.12.2
 	github.com/oekit/gormx v0.11.2
