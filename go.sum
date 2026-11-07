@@ -202,8 +202,8 @@ github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLA
 github.com/nyaruka/phonenumbers v1.0.55/go.mod h1:sDaTZ/KPX5f8qyV9qN+hIm+4ZBARJrupC6LuhshJq1U=
 github.com/oekit/bootstrap v0.6.15 h1:kC1CdeBiF4yXQ0A1b3HfTTWSjqXX6uXTWF4s0tAllD0=
 github.com/oekit/bootstrap v0.6.15/go.mod h1:hxJT4M+mWL6BKgaUPHlDIkcP2n6oM3oiSsFRmsDCTbA=
-github.com/oekit/concurrency v0.28.2 h1:mD29H1fieYNGvQMcbDJLhNPjlCo4qlpoKK+B4ML2RNo=
-github.com/oekit/concurrency v0.28.2/go.mod h1:HRmw/O1BsmyfM5DYFoZeL5LqzNAAxdkF0ESORPNxTjI=
+github.com/oekit/concurrency v0.28.3 h1:58u4i/NTSuI1Dzbcm8wsRaairVfbA/CUYMhdpPCNTA8=
+github.com/oekit/concurrency v0.28.3/go.mod h1:yjKEeriuksfgZdVH5GES+L8FO0KfxzaoCA5o6UrvdPc=
 github.com/oekit/core v0.13.2 h1:4r7ulxDb4zo1GwYFVDVNd6ta/vCsiK+Fe8pCP3BiHfQ=
 github.com/oekit/core v0.13.2/go.mod h1:HhBTwYHU5MUp9tfNvHjfZv6P4yglQmn4jKmz98dUIsM=
 github.com/oekit/gormx v0.11.5 h1:2f0TxeK12n3ftIxvzQ0VXhe7iQvW/688Gl4V7Pb49kU=

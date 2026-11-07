@@ -7,7 +7,7 @@ require (
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
 	github.com/oekit/bootstrap v0.6.15
-	github.com/oekit/concurrency v0.28.2
+	github.com/oekit/concurrency v0.28.3
 	github.com/oekit/core v0.13.2
 	github.com/oekit/gormx v0.11.5
 	github.com/oekit/kitx v0.4.2
