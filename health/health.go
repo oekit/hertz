@@ -44,6 +44,33 @@
 // 软依赖降级: Checker 可返回 health.Degraded(err) 标记降级——
 // CheckResult.Status = health.StatusDegraded、Error 填充，但 HTTP 仍 200（就绪不失败），
 // data.status 可为 StatusDegraded 供告警识别，软依赖不可用不会误杀就绪。
+//
+// # 与 bootstrap/healthz 的规范与差异
+//
+// oekit 里有两个健康检查形态，职责分工不同：
+//
+//   - **hertz/health（本包）是 HTTP 服务的规范形态**：ekit 统一信封
+//     {code,data,message,trace_id} + data.status 三态（ok/degraded/error，
+//     软依赖降级不摘流），逐项明细 checks 数组，响应体可用导出的
+//     HealthResponse 直接解码。
+//   - **bootstrap/healthz 是传输无关的极简形态**：包级 registry +
+//     Handle(ctx) 返回 (statusCode, jsonBody)，由业务的 HTTP handler 桥接
+//     （c.Data 直写，勿 c.JSON 二次编码），不绑定 hertz——kitex 等非 HTTP
+//     服务也能用。
+//
+// 差异速查（选型/对接时勿混淆两包的响应契约）：
+//
+//	响应形状    hertz/health: ekit 信封 {code,data,message,trace_id}，
+//	            bootstrap/healthz: 裸对象 {status,closed,checks}
+//	默认总超时  hertz/health: 3s（WithCheckTimeout 调整）
+//	            bootstrap/healthz: 5s（SetCheckTimeout 调整）
+//	超时文案    hertz/health: 单项 error 记 "timeout"
+//	            bootstrap/healthz: 记 "check timeout after 5s"（含实际超时时长）
+//
+// 选型：hertz HTTP 服务用本包（规范形态，含 Degraded 三态与脱敏策略）；
+// 非 HTTP / 不想引入 hertz 依赖的进程级健康检查用 bootstrap/healthz。
+// 两包的语义对齐（healthz 侧三态/降级支持的演进）以 bootstrap 仓文档为准，
+// 本节仅钉住上表所列的既有差异。
 package health
 
 import (
