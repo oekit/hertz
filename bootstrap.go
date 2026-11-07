@@ -43,7 +43,12 @@ type RunServerOption func(*runServerConfig)
 type runServerConfig struct {
 	onReady      func(ctx context.Context)
 	probeTimeout time.Duration
-	probeEnabled bool
+	// probeDisabled 由 WithReadyProbeTimeout(负数) 置 true：禁用探活，
+	// RunServer 在 GoBackground 启动前同步回调 onReady。
+	// 注意语义方向：**不能用「probeEnabled bool」（bool 零值 false）表示启用**——
+	// 未设置 WithReadyProbeTimeout 的缺省语义是「探活 + 默认 5s 超时」，
+	// 若以 enabled=false 表示禁用，缺省会被误判成禁用（#129）。
+	probeDisabled bool
 }
 
 // WithOnReady 注册就绪回调：TCP 探活通过（**server 的监听地址**可建连）后执行，
@@ -52,18 +57,22 @@ type runServerConfig struct {
 //
 // ⚠️ 探活目标是 **server 的单个监听地址**（hertz v0.10.6 的
 // server.WithHostPorts(hp string) 只存一个地址到 Options.Addr，
-// config.Options 无多地址字段）——不是「全部 HostPort」。
+// config.Options 无多地址字段）——不是「全部 HostPort」。Addr 为空但设置了
+// server.WithListener 时退回探 listener 地址；两者皆空时退化为
+// 「等 engine running 再回调」（见 probeAndReady，#131）。
 func WithOnReady(fn func(ctx context.Context)) RunServerOption {
 	return func(cfg *runServerConfig) { cfg.onReady = fn }
 }
 
-// WithReadyProbeTimeout 配置探活超时（默认 5s）。设为负数禁用探活——
-// 直接在 GoBackground 启动前同步回调（不推荐：回调时端口可能尚未监听，
-// hertz OnRun 钩子先于 listenAndServe 执行，无原生就绪信号可用）。
+// WithReadyProbeTimeout 配置探活超时（默认 5s；传 0 或未设置同为默认 5s）。
+// 设为负数禁用探活——RunServer 在 GoBackground 启动前**同步**回调 onReady，
+// 且不启动探活协程（探活失败不会触发 RequestShutdown）。不推荐禁用：
+// 回调时端口可能尚未监听，hertz OnRun 钩子先于 listenAndServe 执行，
+// 无原生就绪信号可用。
 func WithReadyProbeTimeout(d time.Duration) RunServerOption {
 	return func(cfg *runServerConfig) {
 		cfg.probeTimeout = d
-		cfg.probeEnabled = d >= 0
+		cfg.probeDisabled = d < 0
 	}
 }
 
@@ -76,7 +85,9 @@ func WithReadyProbeTimeout(d time.Duration) RunServerOption {
 //     设置 WithOnReady 时，**探活与 h.Run() 并发**（#43）：监听端口是在
 //     h.Run() 内部（engine.Run → listenAndServe）才绑定的，串行先探活必然
 //     connection refused、探活必超时、server 根本不会启动。探活循环 TCP dial
-//     监听地址（默认超时 5s，WithReadyProbeTimeout 可调），可建连后执行
+//     监听地址（默认超时 5s，WithReadyProbeTimeout 可调；**传负数禁用探活**——
+//     此时在 GoBackground 启动前同步回调 onReady，不启动探活协程，探活失败
+//     关机的路径整个不存在），可建连后执行
 //     onReady——hertz 的 OnRun 钩子先于 listenAndServe 执行，无法用作就绪
 //     信号，故以探活近似真实就绪（TCP 可建连 ≠ 业务健康，业务级健康门请配合
 //     hertz/health 检查后再 Ready）。
@@ -133,6 +144,15 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 		}
 		return nil
 	})
+	// WithReadyProbeTimeout(负数) = 显式禁用探活（#129/#132）：在 GoBackground
+	// 启动前**同步**回调 onReady（与 WithReadyProbeTimeout 的 godoc 承诺一致），
+	// 且不启动探活协程。禁用探活的典型动机恰是「addr 不可拨号」场景（自定义
+	// listener / 不可路由主机名）：若仍照跑探活，必然失败并触发
+	// RequestShutdown——被禁用的探活反而把服务在启动期杀掉。
+	if cfg.onReady != nil && cfg.probeDisabled {
+		bootstrapLog.Info("hertz ready probe disabled, invoking onReady synchronously before run", "name", name)
+		cfg.onReady(app.Context())
+	}
 	app.GoBackground(name+"-run", func(_ context.Context) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -141,7 +161,7 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 				app.RequestShutdown()
 			}
 		}()
-		if cfg.onReady != nil {
+		if cfg.onReady != nil && !cfg.probeDisabled {
 			// 探活必须与 h.Run() **并发**（#43）：监听端口是在 h.Run() 内部
 			// （engine.Run → listenAndServe）才绑定的，先探活后启动必然
 			// connection refused ⇒ 探活必超时 ⇒ server 根本不会启动。
@@ -177,7 +197,7 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 
 // probeAndReady 循环 TCP dial 探活监听地址，可建连后执行 onReady。
 //
-// 三条守则（#43 / #48）：
+// 四条守则（#43 / #48 / #131）：
 //   - 只在 engine 进入 running 之后才发起探活：端口绑定前探活必然 refused，
 //     白白重试到超时；
 //   - 探活通过后复核 engine 仍在 running：端口被**他人**占用时，探活连上的
@@ -188,18 +208,56 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 //     errProbeAborted，而不是「探活超时」——两者在调用方是不同语义（正常终止
 //     vs 启动失败）。每次判定超时前先看 ctx.Err()，避免「关停与超时同时发生」
 //     时把关停误报成启动失败。
-func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
-	timeout := cfg.probeTimeout
-	if !cfg.probeEnabled {
-		timeout = defaultReadyProbeTimeout
+//   - 探活目标解析（#131）：优先 Options.Addr（server.WithHostPorts 只存
+//     单个地址；server.WithListener 也会把 Addr 设为 ln.Addr()）。Addr 为空
+//     但保留了 Listener 时退回探 listener 地址；两者皆空（server 将在
+//     h.Run() 内绑定随机端口，地址事先未知）时无法 dial——至少等到 engine
+//     进入 running 再回调，消除「onReady 在 server 尚未 serve 时立即执行」
+//     的未监听窗口（窗口内注册中心已有实例但端口未监听，健康检查/首轮流量
+//     直接失败）。
+//
+// probeTimeoutOrDefault 归一探活超时：零值/缺省 = 默认 5s（#129）。
+// 负数不会走到这里（probeDisabled 时 RunServer 不启动探活），
+// 不再存在「负数悄悄换默认值继续探」的回退。
+func (cfg *runServerConfig) probeTimeoutOrDefault() time.Duration {
+	if cfg.probeTimeout <= 0 {
+		return defaultReadyProbeTimeout
 	}
-	if timeout == 0 {
-		timeout = defaultReadyProbeTimeout
+	return cfg.probeTimeout
+}
+
+func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
+	timeout := cfg.probeTimeoutOrDefault()
+
+	opts := h.GetOptions()
+	addr := opts.Addr
+	if addr == "" && opts.Listener != nil {
+		addr = opts.Listener.Addr().String()
+	}
+	network := opts.Network
+	if network == "" {
+		network = "tcp"
 	}
 
-	addr := h.GetOptions().Addr
 	if addr == "" {
-		// 无监听地址可探（测试或自定义 listener）：直接回调
+		// 无任何可探地址（Addr 与 Listener 皆空）：无法 TCP dial，退化为
+		// 「等 engine running 再回调」（#131），仍受同一超时与关停语义约束。
+		bootstrapLog.Info("hertz ready probe has no dial target, waiting for engine running before onReady",
+			"name", name)
+		deadline := time.Now().Add(timeout)
+		for !h.IsRunning() {
+			if ctx.Err() != nil {
+				return errProbeAborted
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("ready probe timeout after %s: server not running and no dial target", timeout)
+			}
+			select {
+			case <-ctx.Done():
+				return errProbeAborted
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
 		cfg.onReady(app.Context())
 		return nil
 	}
@@ -222,7 +280,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 			continue
 		}
 		d := net.Dialer{Timeout: 500 * time.Millisecond}
-		conn, err := d.DialContext(ctx, "tcp", addr)
+		conn, err := d.DialContext(ctx, network, addr)
 		if err == nil {
 			_ = conn.Close()
 			if !h.IsRunning() {

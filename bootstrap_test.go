@@ -16,6 +16,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
+	standard "github.com/cloudwego/hertz/pkg/network/standard"
 	"github.com/oekit/bootstrap"
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/lifecycle"
@@ -395,5 +396,313 @@ func TestRunServer_NoOnReady_DefaultShape(t *testing.T) {
 
 	if len(app.closers) != 1 {
 		t.Fatalf("closers = %v", app.closers)
+	}
+}
+
+// orderingFakeApp 记录「onReady 同步回调」与「GoBackground 启动」的先后顺序
+// （#129/#132：负数禁用探活时，onReady 必须在 GoBackground 启动前同步执行）。
+type orderingFakeApp struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	order      []string
+	shutdowns  atomic.Int64
+	background func(ctx context.Context)
+}
+
+func newOrderingFakeApp() *orderingFakeApp {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &orderingFakeApp{ctx: ctx, cancel: cancel}
+}
+
+func (f *orderingFakeApp) log(ev string) {
+	f.mu.Lock()
+	f.order = append(f.order, ev)
+	f.mu.Unlock()
+}
+
+func (f *orderingFakeApp) snapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.order...)
+}
+
+func (f *orderingFakeApp) Context() context.Context { return f.ctx }
+
+func (f *orderingFakeApp) AddResource(string, func(context.Context) error) {}
+
+func (f *orderingFakeApp) GoBackground(_ string, fn func(ctx context.Context)) {
+	f.log("goBackground")
+	// 刻意不立刻执行 fn：本用例只验证同步语义（onReady 先于 GoBackground
+	// 注册发生），不真正启动 server。
+	f.background = fn
+}
+
+func (f *orderingFakeApp) RequestShutdown() {
+	f.shutdowns.Add(1)
+}
+
+// TestRunServer_ReadyProbeDisabled_SyncOnReadyBeforeRun 钉住负数路径的
+// 文档语义（#129/#132）：WithReadyProbeTimeout(负数) = 禁用探活——
+// onReady 在 RunServer 返回前**同步**执行（早于 GoBackground），
+// 且不启动探活协程（探活目标不可拨号也不会触发 RequestShutdown——
+// 旧实现照跑探活，5s 窗口后被禁用的探活把服务在启动期杀掉）。
+func TestRunServer_ReadyProbeDisabled_SyncOnReadyBeforeRun(t *testing.T) {
+	fa := newOrderingFakeApp()
+	// 探活目标不可拨号（端口 0 永远拒绝建连）：若负数没真正禁用探活，
+	// 旧实现的探活协程会在超时后 RequestShutdown。
+	h := server.New(server.WithHostPorts("127.0.0.1:0"))
+
+	var readyCalled atomic.Int64
+	RunServer(fa, "disabled-probe-svc", h,
+		WithOnReady(func(ctx context.Context) {
+			fa.log("onReady")
+			readyCalled.Add(1)
+		}),
+		WithReadyProbeTimeout(-1*time.Second),
+	)
+
+	// 同步语义：RunServer 返回时 onReady 已执行且恰好一次，先于 GoBackground。
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times synchronously, want 1", got)
+	}
+	if order := fa.snapshot(); len(order) != 2 || order[0] != "onReady" || order[1] != "goBackground" {
+		t.Fatalf("order = %v, want [onReady goBackground]", order)
+	}
+
+	// 禁用的探活不得杀服务：静置一段窗口（远小于旧实现的 5s 探活超时），
+	// 不应出现任何 RequestShutdown。
+	time.Sleep(600 * time.Millisecond)
+	if got := fa.shutdowns.Load(); got != 0 {
+		t.Fatalf("disabled probe must not request shutdown, got %d", got)
+	}
+	fa.cancel()
+}
+
+// TestRunServer_ReadyProbeDisabled_RealRunStillServes 钉住负数路径与真实
+// h.Run() 的组合（#132 复现形态）：server 正常启动并监听（Addr 绑随机端口），
+// onReady 恰好一次，且无探活失败关机。
+func TestRunServer_ReadyProbeDisabled_RealRunStillServes(t *testing.T) {
+	h := server.New(server.WithHostPorts("127.0.0.1:0"),
+		server.WithExitWaitTime(100*time.Millisecond),
+	)
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	RunServer(app, "disabled-probe-run", h,
+		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
+		WithReadyProbeTimeout(-1),
+	)
+
+	// #132 复现断言：旧实现 onReady 调用数 = 0（探活在跑），这里必须立刻为 1。
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times immediately after RunServer, want 1 (sync path)", got)
+	}
+
+	time.Sleep(600 * time.Millisecond)
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times, want exactly 1", got)
+	}
+	if got := app.shutdowns.Load(); got != 0 {
+		t.Fatalf("disabled probe must not request shutdown, got %d", got)
+	}
+}
+
+// TestRunServer_ReadyProbeTimeoutZero_StillProbes 钉住零值路径（#129/#132）：
+// WithReadyProbeTimeout(0) 不是「禁用」——不取同步回调捷径，探活照常进行
+// （超时归一为默认 5s）。探活目标 127.0.0.1:0 不可建连 ⇒ 零值下 onReady
+// 不应被调用（探活窗口内既没通过也没失败到关机）。
+func TestRunServer_ReadyProbeTimeoutZero_StillProbes(t *testing.T) {
+	h := server.New(server.WithHostPorts("127.0.0.1:0"),
+		server.WithExitWaitTime(100*time.Millisecond),
+	)
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	RunServer(app, "zero-probe-svc", h,
+		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
+		WithReadyProbeTimeout(0),
+	)
+
+	// 同步回调不存在：RunServer 返回时 onReady 必须尚未执行。
+	if got := readyCalled.Load(); got != 0 {
+		t.Fatalf("zero timeout must not take the sync-callback path, onReady called %d", got)
+	}
+
+	// 600ms < 默认 5s 探活窗口：探活仍在进行，未通过也未到失败关机。
+	time.Sleep(600 * time.Millisecond)
+	if got := readyCalled.Load(); got != 0 {
+		t.Fatalf("onReady must not fire while probing an undialable addr, got %d", got)
+	}
+	if got := app.shutdowns.Load(); got != 0 {
+		t.Fatalf("probe must still be within default 5s window, shutdowns = %d", got)
+	}
+}
+
+// TestWithReadyProbeTimeout_Semantics 单元钉住选项语义（#129）：
+// 负数=禁用探活；零/缺省=探活 + 默认 5s；正数=按值。
+func TestWithReadyProbeTimeout_Semantics(t *testing.T) {
+	cfg := &runServerConfig{}
+	if cfg.probeDisabled {
+		t.Fatal("default config must have probe enabled (缺省=探活+默认 5s)")
+	}
+	if got := cfg.probeTimeoutOrDefault(); got != 5*time.Second {
+		t.Fatalf("default probe timeout = %v, want 5s", got)
+	}
+
+	WithReadyProbeTimeout(0)(cfg)
+	if cfg.probeDisabled {
+		t.Fatal("zero timeout must not disable probe")
+	}
+	if got := cfg.probeTimeoutOrDefault(); got != 5*time.Second {
+		t.Fatalf("zero probe timeout = %v, want default 5s", got)
+	}
+
+	WithReadyProbeTimeout(3 * time.Second)(cfg)
+	if cfg.probeDisabled {
+		t.Fatal("positive timeout must not disable probe")
+	}
+	if got := cfg.probeTimeoutOrDefault(); got != 3*time.Second {
+		t.Fatalf("probe timeout = %v, want 3s", got)
+	}
+
+	WithReadyProbeTimeout(-1)(cfg)
+	if !cfg.probeDisabled {
+		t.Fatal("negative timeout must disable probe")
+	}
+}
+
+// TestRunServer_ReadyProbe_CustomListener 钉住自定义 listener 形态（#131）：
+// server.WithListener(ln) 下探活目标为 ln 的地址（hertz v0.10.6 的
+// WithListener 会把 Options.Addr 设为 ln.Addr().String()），探活通过后
+// onReady 执行。自定义 listener 按官方建议显式用标准库 transporter。
+func TestRunServer_ReadyProbe_CustomListener(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	h := server.New(
+		server.WithListener(ln),
+		server.WithTransport(standard.NewTransporter),
+		server.WithExitWaitTime(100*time.Millisecond),
+	)
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	RunServer(app, "listener-svc", h,
+		WithOnReady(func(ctx context.Context) { readyCalled.Add(1) }),
+		WithReadyProbeTimeout(5*time.Second),
+	)
+
+	deadline := time.After(5 * time.Second)
+	for readyCalled.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("onReady not called within deadline for custom-listener server")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times, want 1", got)
+	}
+	// server 确实在 listener 上服务
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+	if err != nil {
+		t.Fatalf("server must serve on listener addr %s: %v", ln.Addr(), err)
+	}
+	_ = conn.Close()
+}
+
+// TestRunServer_ReadyProbe_AddrEmptyWithListener_ProbesListenerAddr 钉住
+// Addr 被显式清空但保留 Listener 的形态（#131）：退回探 listener 地址，
+// 而不是零探活立即回调（旧实现存在「回调时 server 尚未 serve」的窗口）。
+func TestRunServer_ReadyProbe_AddrEmptyWithListener_ProbesListenerAddr(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+
+	h := server.New(
+		server.WithListener(ln),
+		server.WithTransport(standard.NewTransporter),
+		server.WithHostPorts(""), // 显式清空 Addr：触发 listener 退回路径
+		server.WithExitWaitTime(100*time.Millisecond),
+	)
+	if got := h.GetOptions().Addr; got != "" {
+		t.Fatalf("precondition: Options.Addr = %q, want empty", got)
+	}
+	if h.GetOptions().Listener == nil {
+		t.Fatal("precondition: Options.Listener must be set")
+	}
+
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	var ranWhenReady atomic.Bool
+	RunServer(app, "empty-addr-listener-svc", h,
+		WithOnReady(func(ctx context.Context) {
+			ranWhenReady.Store(h.IsRunning())
+			readyCalled.Add(1)
+		}),
+		WithReadyProbeTimeout(5*time.Second),
+	)
+
+	deadline := time.After(5 * time.Second)
+	for readyCalled.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("onReady not called within deadline (listener addr must be probed)")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if !ranWhenReady.Load() {
+		t.Fatal("onReady must fire only after engine running (no pre-listen window)")
+	}
+}
+
+// TestRunServer_ReadyProbe_AddrEmptyNoListener_WaitsForRunning 钉住
+// Addr 与 Listener 皆空的形态（#131）：server 将在 h.Run() 内绑定随机端口，
+// 地址事先未知、无法 dial——onReady 至少要等到 engine 进入 running 才执行，
+// 消除旧实现「零探活立即回调」的未监听窗口。
+func TestRunServer_ReadyProbe_AddrEmptyNoListener_WaitsForRunning(t *testing.T) {
+	h := server.New(
+		server.WithHostPorts(""), // Addr 为空：h.Run() 绑随机端口
+		server.WithExitWaitTime(100*time.Millisecond),
+	)
+	if got := h.GetOptions().Addr; got != "" {
+		t.Fatalf("precondition: Options.Addr = %q, want empty", got)
+	}
+
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	var runningWhenReady atomic.Bool
+	RunServer(app, "empty-addr-svc", h,
+		WithOnReady(func(ctx context.Context) {
+			runningWhenReady.Store(h.IsRunning())
+			readyCalled.Add(1)
+		}),
+		WithReadyProbeTimeout(5*time.Second),
+	)
+
+	deadline := time.After(5 * time.Second)
+	for readyCalled.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("onReady not called within deadline")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// 核心回归断言：旧实现立即回调（IsRunning=false）；新实现等 running。
+	if !runningWhenReady.Load() {
+		t.Fatal("onReady fired before engine running (unlistened-registration window)")
 	}
 }
