@@ -1,7 +1,7 @@
 # AGENTS.md — oekit/hertz
 
 > Hertz 运行时集成（模块根扁平化）——日志桥接、生命周期、SSE/health/metrics、适配器、OTel、crudh/validatorh（基于 kitx/validator）/versionh（原 handler 微库收编）；RunServer 变参就绪门 WithOnReady（TCP 探活 **server.Options.Addr 单地址**可建连后回调——hertz v0.10.6 的 server.WithHostPorts 只存一个地址、config.Options 无多地址字段，**不是「全部 HostPort」**；Addr 为空但设了 server.WithListener 时退回探 listener 地址，两者皆空时退化为等 engine running 再回调；探活超时按启动失败优雅关机；缺省超时 5s 经 WithReadyProbeTimeout 调整，**负数=禁用探活**并在 GoBackground 启动前同步回调 onReady（零值/缺省仍为默认 5s），**无探活地址覆盖选项**（kitex 侧才有 WithReadyAddr）），配合 bootstrap Ready 实现 NNS 延迟注册；transportx（hertz→core/transport 同构适配器）+ chainmw 桥接；v0.10.0 起 `adaptor` 补 `NativeStaticSPAHandler`——SPA（history 路由）静态托管：miss ⇒ 回退入口文件 200（四条判据：仅 GET/HEAD、`WithSPASkipPrefix` 下的路径不回退、末段带扩展名视为具体文件不回退（旧 hash 资源必须 404，否则浏览器报 MIME 错/缓存 HTML）、路径合法；`WithSPAServeDottedPaths` 可放行带点路由），缓存双档（`WithSPAImmutablePrefix` 内容哈希目录长缓存 + 入口缺省 no-cache），回退文件缺失**构造期 panic** 并列出 fsys 根条目（fs.Sub 层级写错是头号成因）；与 `NativeStaticFSHandler` 共用同一段 MIME/写头逻辑
-> 当前版本：`v0.10.0` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
+> 当前版本：`v0.10.1` · module：`github.com/oekit/hertz` · org：[oekit = Open Easy Kit](https://oekit.github.io)
 
 ## 本仓包含
 `./`、`adaptor/`、`chainmw/`、`clientip/`、`crudh/`、`governance/`、`health/`、`health/redischeck/`、`hertzotel/`、`hertztracer/`、`metrics/`、`nns/`、`registry/`、`render/`、`sse/`、`transportx/`、`validatorh/`、`versionh/`
