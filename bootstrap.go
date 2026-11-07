@@ -48,6 +48,9 @@ type runServerConfig struct {
 	// 注意语义方向：**不能用「probeEnabled bool」（bool 零值 false）表示启用**——
 	// 未设置 WithReadyProbeTimeout 的缺省语义是「探活 + 默认 5s 超时」，
 	// 若以 enabled=false 表示禁用，缺省会被误判成禁用（#129）。
+	// 「禁用」是彻底禁用：零探活协程、零 dial（即使探活目标可建连也不碰，
+	// 见 TestRunServer_ReadyProbeDisabled_NeverDials）、不吞用户设置的超时
+	// 值——该分支根本不探活，timeout 字段无关（#146 复审确认语义已闭环）。
 	probeDisabled bool
 }
 
@@ -65,8 +68,9 @@ func WithOnReady(fn func(ctx context.Context)) RunServerOption {
 }
 
 // WithReadyProbeTimeout 配置探活超时（默认 5s；传 0 或未设置同为默认 5s）。
-// 设为负数禁用探活——RunServer 在 GoBackground 启动前**同步**回调 onReady，
-// 且不启动探活协程（探活失败不会触发 RequestShutdown）。不推荐禁用：
+// 设为负数禁用探活（#129/#146）——RunServer 在 GoBackground 启动前**同步**
+// 回调 onReady，且不启动探活协程、不向探活目标发任何 dial（探活失败不会
+// 触发 RequestShutdown）。不推荐禁用：
 // 回调时端口可能尚未监听，hertz OnRun 钩子先于 listenAndServe 执行，
 // 无原生就绪信号可用。
 func WithReadyProbeTimeout(d time.Duration) RunServerOption {
@@ -144,11 +148,11 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 		}
 		return nil
 	})
-	// WithReadyProbeTimeout(负数) = 显式禁用探活（#129/#132）：在 GoBackground
-	// 启动前**同步**回调 onReady（与 WithReadyProbeTimeout 的 godoc 承诺一致），
-	// 且不启动探活协程。禁用探活的典型动机恰是「addr 不可拨号」场景（自定义
-	// listener / 不可路由主机名）：若仍照跑探活，必然失败并触发
-	// RequestShutdown——被禁用的探活反而把服务在启动期杀掉。
+	// WithReadyProbeTimeout(负数) = 显式禁用探活（#129/#132，#146 复审确认）：
+	// 在 GoBackground 启动前**同步**回调 onReady（与 WithReadyProbeTimeout 的
+	// godoc 承诺一致），且不启动探活协程。禁用探活的典型动机恰是「addr 不可
+	// 拨号」场景（自定义 listener / 不可路由主机名）：若仍照跑探活，必然失败
+	// 并触发 RequestShutdown——被禁用的探活反而把服务在启动期杀掉。
 	if cfg.onReady != nil && cfg.probeDisabled {
 		bootstrapLog.Info("hertz ready probe disabled, invoking onReady synchronously before run", "name", name)
 		cfg.onReady(app.Context())
@@ -217,7 +221,7 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 //     直接失败）。
 //
 // probeTimeoutOrDefault 归一探活超时：零值/缺省 = 默认 5s（#129）。
-// 负数不会走到这里（probeDisabled 时 RunServer 不启动探活），
+// 负数不会走到这里（probeDisabled 时 RunServer 不启动探活，#146），
 // 不再存在「负数悄悄换默认值继续探」的回退。
 func (cfg *runServerConfig) probeTimeoutOrDefault() time.Duration {
 	if cfg.probeTimeout <= 0 {

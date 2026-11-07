@@ -479,6 +479,75 @@ func TestRunServer_ReadyProbeDisabled_SyncOnReadyBeforeRun(t *testing.T) {
 	fa.cancel()
 }
 
+// TestRunServer_ReadyProbeDisabled_NeverDials 钉住 #146 的「不发 dial」半边：
+// 负数禁用探活后，即使 Options.Addr 指向**可建连**的真实监听器，也不得对它
+// 发起任何 TCP 探活。计数 listener 记录每一条建连——「探活目标可建连」排除了
+// 「没 dial 是因为连不上」的假阴性，任何路径的探活 dial 都会被计数器捕获
+// （旧实现禁用形同虚设，照常 dial 后按结果回调/关机）。
+//
+// 与 TestRunServer_ReadyProbeDisabled_SyncOnReadyBeforeRun 互补：本用例钉
+// 「零 dial」，后者钉「同步回调先于 GoBackground」——探活若因回归被复活，
+// 两条用例至少一条转红（dial 逃不过计数器；回调顺序逃不过 ordering 断言）。
+func TestRunServer_ReadyProbeDisabled_NeverDials(t *testing.T) {
+	// 「他人」的监听器：可建连、可计数。GoBackground 刻意不执行（ordering
+	// fake 同款），h.Run() 不会与它抢端口；若负数没真正禁用探活，任何位置的
+	// 探活 dial 都会落到计数器上。
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dials atomic.Int64
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		for {
+			conn, aerr := ln.Accept()
+			if aerr != nil {
+				return
+			}
+			dials.Add(1)
+			_ = conn.Close()
+		}
+	}()
+	t.Cleanup(func() {
+		_ = ln.Close()
+		<-acceptDone
+	})
+
+	fa := newOrderingFakeApp()
+	h := server.New(server.WithHostPorts(ln.Addr().String()))
+
+	var readyCalled atomic.Int64
+	RunServer(fa, "no-dial-svc", h,
+		WithOnReady(func(ctx context.Context) {
+			fa.log("onReady")
+			readyCalled.Add(1)
+		}),
+		WithReadyProbeTimeout(-1*time.Second),
+	)
+
+	// 同步语义（与 SyncOnReadyBeforeRun 同款断言）：onReady 恰好一次、先于
+	// GoBackground——回归复活的探活协程只能晚于 GoBackground 存在，回调
+	// 顺序必被 ordering 抓住。
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times synchronously, want 1", got)
+	}
+	if order := fa.snapshot(); len(order) != 2 || order[0] != "onReady" || order[1] != "goBackground" {
+		t.Fatalf("order = %v, want [onReady goBackground]", order)
+	}
+
+	// 静置窗口（旧实现下探活协程早已启动并进入重试循环的时间尺度）：
+	// 对可建连目标零建连、零关机请求。
+	time.Sleep(600 * time.Millisecond)
+	if got := dials.Load(); got != 0 {
+		t.Fatalf("disabled probe must not dial the target, got %d dials", got)
+	}
+	if got := fa.shutdowns.Load(); got != 0 {
+		t.Fatalf("disabled probe must not request shutdown, got %d", got)
+	}
+	fa.cancel()
+}
+
 // TestRunServer_ReadyProbeDisabled_RealRunStillServes 钉住负数路径与真实
 // h.Run() 的组合（#132 复现形态）：server 正常启动并监听（Addr 绑随机端口），
 // onReady 恰好一次，且无探活失败关机。
