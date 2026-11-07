@@ -17,7 +17,7 @@ require (
 	github.com/oekit/nns v0.5.10
 	github.com/oekit/pkg v0.37.1
 	github.com/oekit/registry v0.5.5
-	github.com/oekit/registry/nacos v0.1.8
+	github.com/oekit/registry/nacos v0.1.9
 	github.com/oekit/tracing v0.3.5
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
@@ -33,7 +33,7 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/hertz-contrib/requestid v1.1.0 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.8 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.9 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
