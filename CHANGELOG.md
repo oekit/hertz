@@ -1,3 +1,7 @@
+## [v0.10.2] — 2026-11-07
+
+- build: 全线依赖地板对齐（16 项，v0.1.27 维护轮）
+
 ## [v0.10.1] — 2026-11-07
 
 - fix(bootstrap): WithReadyProbeTimeout 负数=禁用探活+GoBackground 前同步回调 onReady——文档承诺兑现，探活失败关健康 server 的路径整个不存在（#129 #132）
