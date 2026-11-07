@@ -1,3 +1,14 @@
+## [v0.10.1] — 2026-11-07
+
+- fix(bootstrap): WithReadyProbeTimeout 负数=禁用探活+GoBackground 前同步回调 onReady——文档承诺兑现，探活失败关健康 server 的路径整个不存在（#129 #132）
+- docs(AGENTS): 就绪探活覆盖面口径修正——Options.Addr 单地址，非「全部 HostPort」（#130）
+- fix(bootstrap): Addr 为空时退回探 Listener.Addr / 等 engine running——自定义 listener 的未监听即注册窗口关闭（#131）
+- fix(nns): 跳过派发轮不消费变更基线——实例变更不再被 cache 吞掉，排空后自动补发（#133）
+- docs(health): 「与 bootstrap/healthz 的规范与差异」——hertz/health（信封+三态）为 HTTP 规范形态，差异表钉住（oekit#140 hertz 侧）
+- build: 依赖地板对齐（bootstrap v0.6.15 / core v0.13.1 / pkg v0.37.1 等全线）
+
+关联问题单：hertz#129、hertz#130、hertz#131、hertz#132、hertz#133。
+
 ## [v0.10.0] — 2026-11-07
 
 ### Added（adaptor）
