@@ -148,73 +148,89 @@ func (h *InstanceWatcher) checkService(ctx context.Context, serviceName string) 
 
 	h.mu.Lock()
 	prev := h.cache[serviceName]
+	h.mu.Unlock()
+
+	if !instancesChanged(prev, copied) {
+		// 无变更：仅刷新缓存内容（与 prev 等价，覆盖元数据等不可比字段）。
+		h.mu.Lock()
+		h.cache[serviceName] = copied
+		h.mu.Unlock()
+		return
+	}
+
+	// 上一轮回调尚未跑完（挂死或超过 5s 超时窗口）时跳过本轮派发，
+	// 防止挂死回调导致 goroutine 与 channel 每轮 tick 无界累积。
+	// ⚠️ 跳过时**不得更新 cache**（#133）：cache 是 diff 的 prev 基线，若先把
+	// 本轮变更消费进 cache 再跳过派发，回调恢复后下一轮 instancesChanged 必为
+	// false——变更事件被永久吞掉，订阅方（客户端 LB 缓存类）停留在旧实例集且
+	// 无任何重试/补发。保持 cache 不动 ⇒ 回调排空后的下一轮会重新发现同一变更
+	// 并重新派发（cache 与订阅方一致地「暂时落后」，而非「永久分叉」）。
+	pending, _ := h.inflight.LoadOrStore(serviceName, new(atomic.Int32))
+	pendingCount := pending.(*atomic.Int32)
+	if pendingCount.Load() > 0 {
+		healthLog.Warn("previous callback dispatch still running, skip this round (cache untouched, will re-diff)", "service", serviceName)
+		return
+	}
+
+	evt := InstanceEvent{
+		Type:    EventChanged,
+		Service: serviceName,
+		// 回调专属深拷贝：copied 同时是 h.cache 的存储值，若直接交给回调，
+		// 回调中的修改会污染缓存与下一次 diff 的 prev 基线（review L8）
+		Instances: deepCopyInstances(copied),
+	}
+	if len(prev) == 0 && len(copied) > 0 {
+		evt.Type = EventAdded
+	} else if len(copied) == 0 && len(prev) > 0 {
+		evt.Type = EventRemoved
+	}
+	h.mu.RLock()
+	callbacks := make([]func(InstanceEvent), len(h.callbacks))
+	copy(callbacks, h.callbacks)
+	h.mu.RUnlock()
+
+	// 派发决策已通过：此刻才把本轮结果落进 cache（prev 基线推进为本次
+	// 派发的内容，cache 始终反映「已派发（或正在派发）的最新实例集」）。
+	h.mu.Lock()
 	h.cache[serviceName] = copied
 	h.mu.Unlock()
 
-	if instancesChanged(prev, copied) {
-		evt := InstanceEvent{
-			Type:    EventChanged,
-			Service: serviceName,
-			// 回调专属深拷贝：copied 同时是 h.cache 的存储值，若直接交给回调，
-			// 回调中的修改会污染缓存与下一次 diff 的 prev 基线（review L8）
-			Instances: deepCopyInstances(copied),
-		}
-		if len(prev) == 0 && len(copied) > 0 {
-			evt.Type = EventAdded
-		} else if len(copied) == 0 && len(prev) > 0 {
-			evt.Type = EventRemoved
-		}
-		h.mu.RLock()
-		callbacks := make([]func(InstanceEvent), len(h.callbacks))
-		copy(callbacks, h.callbacks)
-		h.mu.RUnlock()
-
-		// 上一轮回调尚未跑完（挂死或超过 5s 超时窗口）时跳过本轮派发，
-		// 防止挂死回调导致 goroutine 与 channel 每轮 tick 无界累积
-		pending, _ := h.inflight.LoadOrStore(serviceName, new(atomic.Int32))
-		pendingCount := pending.(*atomic.Int32)
-		if pendingCount.Load() > 0 {
-			healthLog.Warn("previous callback dispatch still running, skip this round", "service", serviceName)
-			return
-		}
-
-		// 每个 callback 共用一个超时计时器，循环复用前必须清掉 pending tick，
-		// 否则上一次 fire 的 tick 会让下一次 select 立刻命中误报 timeout。
-		timeoutTimer := time.NewTimer(5 * time.Second)
-		// 第一个 iteration 不需要 drain（timer 刚 NewTimer，timer.C 一定空）。
-		first := true
-		for _, cb := range callbacks {
-			done := make(chan struct{})
-			callback := cb
-			pendingCount.Add(1)
-			async.GoSafe(func() {
-				defer func() {
-					pendingCount.Add(-1)
-					close(done)
-				}()
-				callback(evt)
-			})
-			if !first {
-				// Stop + drain 模式：上一次循环可能因为 timeout 已 fire，
-				// 残留 tick 在 channel 上。必须先 Stop 再消费，否则下一次
-				// Reset 不会清掉这个 stale tick。
-				if !timeoutTimer.Stop() {
-					select {
-					case <-timeoutTimer.C:
-					default:
-					}
+	// 每个 callback 共用一个超时计时器，循环复用前必须清掉 pending tick，
+	// 否则上一次 fire 的 tick 会让下一次 select 立刻命中误报 timeout。
+	timeoutTimer := time.NewTimer(5 * time.Second)
+	// 第一个 iteration 不需要 drain（timer 刚 NewTimer，timer.C 一定空）。
+	first := true
+	for _, cb := range callbacks {
+		done := make(chan struct{})
+		callback := cb
+		pendingCount.Add(1)
+		async.GoSafe(func() {
+			defer func() {
+				pendingCount.Add(-1)
+				close(done)
+			}()
+			callback(evt)
+		})
+		if !first {
+			// Stop + drain 模式：上一次循环可能因为 timeout 已 fire，
+			// 残留 tick 在 channel 上。必须先 Stop 再消费，否则下一次
+			// Reset 不会清掉这个 stale tick。
+			if !timeoutTimer.Stop() {
+				select {
+				case <-timeoutTimer.C:
+				default:
 				}
 			}
-			first = false
-			timeoutTimer.Reset(5 * time.Second)
-			select {
-			case <-done:
-			case <-timeoutTimer.C:
-				healthLog.Warn("callback timeout", "service", serviceName)
-			}
 		}
-		timeoutTimer.Stop()
+		first = false
+		timeoutTimer.Reset(5 * time.Second)
+		select {
+		case <-done:
+		case <-timeoutTimer.C:
+			healthLog.Warn("callback timeout", "service", serviceName)
+		}
 	}
+	timeoutTimer.Stop()
 }
 
 func instancesChanged(a, b []ereg.Instance) bool {
