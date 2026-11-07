@@ -3,10 +3,12 @@ package nns
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
+	"github.com/oekit/concurrency/async"
 	ereg "github.com/oekit/registry"
 	registrymocks "github.com/oekit/registry/registrymocks"
 )
@@ -217,7 +219,113 @@ func TestEventTypes(t *testing.T) {
 	assert.DeepEqual(t, EventType(2), EventChanged)
 }
 
-// TestInstanceWatcher_CallbackMutationDoesNotCorruptCache 验证回调收到的
+// waitFor 轮询等待条件成立（同步测试辅助，deadline 内不成立即 fatal）。
+func waitFor(t *testing.T, d time.Duration, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not met within deadline")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// TestInstanceWatcher_SkipRoundDoesNotConsumeChange 是 #133 的回归测试：
+// 回调派发被跳过的轮次（上一轮回调仍在 5s 超时窗口内挂起）里发生的实例变更
+// **不得被 cache 消费掉**。
+//
+// 旧实现先 `h.cache[svc] = copied` 再判 pending-skip：挂死/慢回调期间注册中心
+// 发生的变更进了 cache 但派发被跳过；回调恢复后下一轮 diff（prev 已是新值）
+// 为 false——变更永久丢失，订阅方停留在旧实例集且无重试/补发。
+//
+// 复现路径（对齐 issue 实测：interval=200ms、回调睡 6s、t=600ms 注入第二实例）：
+//  1. 首轮派发 Added（1 实例），回调挂在 release 上（模拟 >5s 慢回调）；
+//  2. 注册中心新增第二实例，第二轮 checkService 因 inflight>0 跳过派发——
+//     此刻 cache 必须仍是 1 实例（变更未被消费）；
+//  3. 放行首轮回调、排空后第三轮重 diff：变更被重新发现并派发（Changed，2 实例），
+//     cache 推进为 2。
+func TestInstanceWatcher_SkipRoundDoesNotConsumeChange(t *testing.T) {
+	disc := &registrymocks.Discoverer{InstancesMap: map[string][]ereg.Instance{
+		"svc-a": {{IP: "10.0.0.1", Port: 8080}},
+	}}
+
+	events := make(chan InstanceEvent, 16)
+	release := make(chan struct{})
+	h := NewInstanceWatcher(disc,
+		WithWatchServices("svc-a"),
+		WithWatchCallback(func(evt InstanceEvent) {
+			if len(evt.Instances) == 1 {
+				// 首轮回调挂起，制造「上一轮派发仍在执行」（>5s 超时窗口）
+				<-release
+			}
+			events <- evt
+		}),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 第一轮（异步：派发会阻塞等回调完成，最长 5s 超时窗）。
+	firstDone := make(chan struct{})
+	async.GoSafe(func() {
+		h.checkService(ctx, "svc-a")
+		close(firstDone)
+	})
+
+	// 等回调真正进入挂起态（inflight>0 时 Discover 已返回，之后对
+	// disc.InstancesMap 的写入不会与 Discover 竞争）。
+	waitFor(t, 2*time.Second, func() bool {
+		v, ok := h.inflight.Load("svc-a")
+		return ok && v.(*atomic.Int32).Load() > 0
+	})
+
+	// 注册中心变更：新增第二实例（发生在回调挂起期间）。
+	disc.InstancesMap["svc-a"] = []ereg.Instance{
+		{IP: "10.0.0.1", Port: 8080},
+		{IP: "10.0.0.2", Port: 8080},
+	}
+
+	// 第二轮：inflight>0 → 跳过派发。核心回归断言：跳过轮不得消费变更。
+	h.checkService(ctx, "svc-a")
+	if got := len(h.GetHealthyInstances("svc-a")); got != 1 {
+		t.Fatalf("skip round consumed the change into cache: cached = %d instances, want 1", got)
+	}
+
+	// 放行首轮回调并等 inflight 排空。
+	close(release)
+	<-firstDone
+	waitFor(t, 2*time.Second, func() bool {
+		v, ok := h.inflight.Load("svc-a")
+		return !ok || v.(*atomic.Int32).Load() == 0
+	})
+
+	// 第三轮：重 diff（prev=1 vs current=2）→ 变更重新派发。
+	h.checkService(ctx, "svc-a")
+
+	// 首轮 Added（回调放行后才投递）。
+	select {
+	case evt := <-events:
+		if evt.Type != EventAdded || len(evt.Instances) != 1 {
+			t.Fatalf("first event = %v (len %d), want Added with 1 instance", evt.Type, len(evt.Instances))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first event not delivered after release")
+	}
+	// 被跳过轮次的变更必须补发——旧实现在此永久丢失。
+	select {
+	case evt := <-events:
+		if evt.Type != EventChanged || len(evt.Instances) != 2 {
+			t.Fatalf("redispatched event = %v (len %d), want Changed with 2 instances", evt.Type, len(evt.Instances))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("change permanently lost: no redispatch after callback drained (#133)")
+	}
+	if got := len(h.GetHealthyInstances("svc-a")); got != 2 {
+		t.Fatalf("cache after redispatch = %d instances, want 2", got)
+	}
+}
+
 // evt.Instances 是缓存专属深拷贝（review L8）：回调中修改事件实例（含
 // Metadata map）不得污染 h.cache，也不得影响下一次轮询的 prev diff 基线。
 // 若事件别名缓存，第一次回调的修改会让第二次轮询误报 instancesChanged。

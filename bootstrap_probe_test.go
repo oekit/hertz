@@ -163,7 +163,6 @@ func TestProbeAndReady_AbortedReturnsSentinel(t *testing.T) {
 	err := probeAndReady(ctx, app, "test-svc", h, &runServerConfig{
 		onReady:      func(context.Context) {},
 		probeTimeout: 30 * time.Second,
-		probeEnabled: true,
 	})
 	if !errors.Is(err, errProbeAborted) {
 		t.Fatalf("probeAndReady err = %v, want errProbeAborted", err)
@@ -180,7 +179,6 @@ func TestProbeAndReady_TimeoutIsNotAbort(t *testing.T) {
 	err := probeAndReady(context.Background(), app, "test-svc", h, &runServerConfig{
 		onReady:      func(context.Context) {},
 		probeTimeout: 100 * time.Millisecond,
-		probeEnabled: true,
 	})
 	if err == nil {
 		t.Fatal("probeAndReady must fail when the probe target is unreachable")
