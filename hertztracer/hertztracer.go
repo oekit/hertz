@@ -24,7 +24,9 @@
 //	h := server.New(server.WithHostPorts(":8080"), tracing.Option)
 //	h.Use(tracing.Middleware)
 //
-//	// 3. 启用 hertz client Opentracing propagation
+//	// 3. 启用 hertz client Opentracing span + 上下文注入（client span 让
+//	//    出站调用在 trace 里可见；注入的 span 上下文让下游 ServerCtx 接续
+//	//    父 span，不再另起根）
 //	c, _ := client.NewClient()
 //	c.Use(hertztracer.NewClientMiddleware())
 //
@@ -33,6 +35,9 @@
 //   - server 端 span 需「server tracer + 中间件」成对装配（见 NewServerTracing）:
 //     只 h.Use 中间件而未装 server tracer 时，中间件自建 span（无 engine
 //     tracer 上下文时）
+//   - client 端中间件自建 span 并按上游 ServerCtx 的接续协议注入 span 上下文
+//     （#177）：上游 ClientCtx 只透传 metainfo 不建 span，本包补齐（与 server
+//     侧「上游不给的能力由本包补上」同口径）
 //   - 业务如果用 jaeger/zipkin SDK(老生态)→ 用 hertztracer
 //   - 业务如果用 OTel SDK(新生态)→ 用 hertzotel(P2-2)
 //
@@ -41,15 +46,20 @@
 package hertztracer
 
 import (
+	"bytes"
 	"context"
 
+	"github.com/bytedance/gopkg/cloud/metainfo"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/client"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	serverconfig "github.com/cloudwego/hertz/pkg/common/config"
 	hertztracing "github.com/cloudwego/hertz/pkg/common/tracer"
+	"github.com/cloudwego/hertz/pkg/protocol"
+	"github.com/hertz-contrib/tracer/common"
 	hertzcontribtracer "github.com/hertz-contrib/tracer/hertz"
 	opentracing "github.com/opentracing/opentracing-go"
+	opentracinglog "github.com/opentracing/opentracing-go/log"
 )
 
 // Option 是 hertztracer 的配置选项(函数选项模式;AGENTS.md「禁止裸 Option」)。
@@ -65,6 +75,9 @@ type ServerOption = Option
 type tracerConfig struct {
 	tracer            opentracing.Tracer
 	formOperationName func(c *app.RequestContext) string
+	// clientOperationName 是 client 侧 span 名生成函数（[WithClientOperationName]；
+	// client 侧没有 *app.RequestContext，server 的 formOperationName 无法复用）。
+	clientOperationName func(req *protocol.Request) string
 }
 
 // WithTracer 指定使用的 OpenTracing tracer。
@@ -77,6 +90,13 @@ func WithTracer(t opentracing.Tracer) Option {
 // nil 时用缺省 "<METHOD> <fullPath>"。
 func WithOperationName(fn func(c *app.RequestContext) string) Option {
 	return func(cfg *tracerConfig) { cfg.formOperationName = fn }
+}
+
+// WithClientOperationName 指定 client 中间件的 span 名生成函数
+// （server 侧的 [WithOperationName] 形参是 *app.RequestContext，client 侧
+// 只有 *protocol.Request，二者无法混用）。nil 时用缺省 "<METHOD> <path>"。
+func WithClientOperationName(fn func(req *protocol.Request) string) Option {
+	return func(cfg *tracerConfig) { cfg.clientOperationName = fn }
 }
 
 // newTracerConfig 聚合选项并填缺省值。
@@ -93,12 +113,20 @@ func newTracerConfig(opts []Option) *tracerConfig {
 	if cfg.formOperationName == nil {
 		cfg.formOperationName = defaultOperationName
 	}
+	if cfg.clientOperationName == nil {
+		cfg.clientOperationName = defaultClientOperationName
+	}
 	return cfg
 }
 
 // defaultOperationName 是缺省 span 名:"<METHOD> <fullPath>"。
 func defaultOperationName(c *app.RequestContext) string {
 	return string(c.Method()) + " " + c.FullPath()
+}
+
+// defaultClientOperationName 是 client 中间件的缺省 span 名:"<METHOD> <path>"。
+func defaultClientOperationName(req *protocol.Request) string {
+	return string(req.Method()) + " " + string(req.Path())
 }
 
 // NewServerMiddleware 构造 hertz server Opentracing 中间件(h.Use 注册)。
@@ -163,8 +191,58 @@ func NewServerTracing(opts ...Option) ServerTracing {
 //
 //	c, _ := client.NewClient()
 //	c.Use(hertztracer.NewClientMiddleware())
-func NewClientMiddleware(_ ...Option) client.Middleware {
-	return hertzcontribtracer.ClientCtx
+//
+// opts **真正生效**：tracer 与 span 名取自 opts（[WithTracer] /
+// [WithClientOperationName]）。
+//
+// 本实现与 [NewServerMiddleware]「自建 span」的口径一致（#177）——上游
+// hertz-contrib/tracer 的 ClientCtx 只做 metainfo → HTTP 头透传，不建 span、
+// 不注入 trace 上下文（出站调用在 trace 里不可见、下游 ServerCtx 因查不到
+// span 上下文另起根 span）；上游 README 的完整客户端装配是
+// ClientTraceMW + ClientCtx 两件套，本中间件把两件事合成一件：
+//
+//  1. 用配置的 tracer 创建 **client span**（出站调用在 trace 里可见，
+//     server span 与下游 span 之间的空档补上），调用失败打 error tag + log；
+//  2. 把 span 上下文按上游 ServerCtx 的接续协议注入：Inject(opentracing.Binary)
+//     进 metainfo 键 common.SpanContextLabel（"JAEGERSPANCONTEXT"），再经
+//     metainfo.ToHTTPHeader 写进请求头——下游 hertztracer/hertz-contrib 的
+//     ServerCtx 从该键 Extract 出父 span（ChildOf），不再另起根 span；
+//  3. 业务 metainfo 透传（上游 ClientCtx 的既有行为）原样保留。
+//
+// ⚠️ 注入值经 HTTP 头传播，metainfo.ToHTTPHeader 会丢弃非合法头字段值的内容
+// （含控制字节的 Binary 载荷，如 jaeger-client-go 的 protobuf 载体）——这是
+// 上游 ClientTraceMW + ClientCtx 装配固有的约束，非本包引入；jaeger/zipkin
+// SDK 的 Binary 载体可配置文本安全形态，或用 [NewServerTracer] 侧同源的
+// tracer 时优先验证一次端到端链路。
+func NewClientMiddleware(opts ...Option) client.Middleware {
+	cfg := newTracerConfig(opts)
+	return func(next client.Endpoint) client.Endpoint {
+		return func(ctx context.Context, req *protocol.Request, resp *protocol.Response) (err error) {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			span, spanCtx := opentracing.StartSpanFromContextWithTracer(ctx, cfg.tracer, cfg.clientOperationName(req))
+			defer span.Finish()
+
+			// 注入（下游 ServerCtx 读的就是这个 metainfo 键）；Inject 失败
+			// 只跳过注入，不中断调用（span 照常产生、Finish 照常执行）。
+			// ⚠️ 必须走 transient（metainfo.WithValue，与上游 ClientTraceMW
+			// 一致）：GetValue 只检索 transient/stale，persistent 值它读不到。
+			var buf bytes.Buffer
+			if injectErr := cfg.tracer.Inject(span.Context(), opentracing.Binary, &buf); injectErr == nil {
+				spanCtx = metainfo.WithValue(spanCtx, common.SpanContextLabel, buf.String())
+			}
+			// metainfo → 请求头：带上注入的 span 上下文与业务 metainfo
+			// （上游 ClientCtx 行为保留）。
+			metainfo.ToHTTPHeader(spanCtx, &req.Header)
+
+			if err = next(spanCtx, req, resp); err != nil {
+				span.SetTag("error", true)
+				span.LogFields(opentracinglog.Error(err))
+			}
+			return err
+		}
+	}
 }
 
 // NewServerTracer 透传 hertz-contrib/tracer.NewTracer,给业务直接拿

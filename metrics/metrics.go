@@ -30,9 +30,15 @@ func MetricsHandler() app.HandlerFunc {
 // MetricsHandlerFor 返回一个 Hertz HandlerFunc，使用指定的 Gatherer。
 // 如果需要暴露自定义的 Registry（非全局的），可以用这个函数。
 //
+// gatherer 为 nil 属构造期配置错误：直接 panic（fail-fast，与 nns.NewRegistry
+// 等本仓口径一致），绝不让 nil 解引用推迟到每个请求上崩。
+//
 // 客户端的 Accept-Encoding / Accept 头会透传给 promhttp，
 // 使 gzip 压缩协商与 OpenMetrics 格式协商正常生效。
 func MetricsHandlerFor(gatherer prometheus.Gatherer) app.HandlerFunc {
+	if gatherer == nil {
+		panic("hertz/metrics: MetricsHandlerFor requires non-nil gatherer")
+	}
 	httpHandler := promHandlerFor(gatherer)
 	return func(ctx context.Context, c *app.RequestContext) {
 		writer := newHertzResponseWriter(c)
@@ -59,6 +65,9 @@ func MetricsHandlerFor(gatherer prometheus.Gatherer) app.HandlerFunc {
 var handlerCache sync.Map // prometheus.Gatherer → http.Handler
 
 // promHandlerFor 返回（并缓存）指定 Gatherer 对应的 promhttp handler。
+//
+// nil 防御分支保留（本函数是包内公共落点），但 MetricsHandlerFor 已在构造期
+// 对 nil fail-fast（#176），正常不会走到。
 //
 // Gatherer 不可比较时（值类型含 slice/map 等）不能作 map key ⇒ 不缓存，
 // 退化为每次新建（行为与缓存前一致）。
@@ -100,13 +109,23 @@ func (w *hertzResponseWriter) Header() http.Header {
 	return w.header
 }
 
+// flushHeaders 把 Header() 里暂存的响应头一次性倒进 hertz 响应头。
+//
+// 同名多值头（http.Header 契约允许 Add 追加）必须逐值保留（#176）：首个值用
+// Set（覆盖掉 hertz 侧可能已有的同名头，语义明确），其余用 Add 追加——此前
+// 内层循环逐值 Set，多值头被静默压成一个（与 #99 / transportx replyHeader.Add
+// 同族缺陷，此处第三份）。
 func (w *hertzResponseWriter) flushHeaders() {
 	if w.written {
 		return
 	}
 	for k, vs := range w.header {
-		for _, v := range vs {
-			w.c.Response.Header.Set(k, v)
+		if len(vs) == 0 {
+			continue
+		}
+		w.c.Response.Header.Set(k, vs[0])
+		for _, v := range vs[1:] {
+			w.c.Response.Header.Add(k, v)
 		}
 	}
 	w.written = true

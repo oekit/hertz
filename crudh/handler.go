@@ -6,6 +6,7 @@ package crudh
 
 import (
 	"context"
+	"database/sql/driver"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -406,7 +407,7 @@ func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service
 	return h
 }
 
-// entityColumns 按实体类型 T 的字段反射生成排序列白名单（#165）。
+// entityColumns 按实体类型 T 的字段反射生成排序列白名单（#165、#175）。
 //
 // 返回「别名 → 规范化列名」映射：规范化列名与 gorm 的 DB 真实列名对齐
 // （gorm `column:` tag 优先；无 tag 字段套 gorm NamingStrategy 的蛇形转换，
@@ -418,18 +419,40 @@ func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service
 // 别名集合 = 规范化列名本身 + json tag 名（小写）。Go 字段名小写**不再是**
 // 别名（与真列名脱节的正是它；无 tag 字段的字段名小写 ≠ 蛇形真列名时旧行为
 // 本就产生 5xx，有此需要的用 gorm column tag 或 json tag 显式声明）。
-// 嵌入结构体（匿名字段）的字段递归收集；time.Time 除外（其内部字段不是列）。
+//
+// 嵌入结构体（#175）：gorm 对嵌入类型只**提升内层字段**为列、不为嵌入类型
+// 本身建列——白名单同样只收内层字段（gorm.Model 的 ID/CreatedAt 等真实列），
+// 嵌入类型名（"model"）绝不作为列入表。嵌入的判定与 gorm 一致：匿名结构体
+// （time.Time / 实现 driver.Valuer 的类型除外，gorm 对它们建单列）或显式
+// `gorm:"embedded"`；`embeddedPrefix` 前缀拼进内层列名（嵌套嵌入累加前缀）。
 //
 // 实体不是结构体 / 无可用字段 ⇒ 空集（白名单外的列一律 400，fail-closed）。
 func entityColumns[T any]() map[string]string {
 	cols := make(map[string]string)
-	collectEntityColumns(reflect.TypeOf((*T)(nil)).Elem(), cols, map[reflect.Type]struct{}{})
+	collectEntityColumnsWithPrefix(reflect.TypeOf((*T)(nil)).Elem(), cols, map[reflect.Type]struct{}{}, "")
 	return cols
 }
 
-// collectEntityColumns 递归收集结构体字段的「别名 → 规范化列名」
-// （含嵌入结构体）。
-func collectEntityColumns(t reflect.Type, cols map[string]string, seen map[reflect.Type]struct{}) {
+// valuerType 是 driver.Valuer 的反射类型：匿名嵌入实现了 Valuer 的结构体时，
+// gorm 不展开内层字段，而是把该字段当**单个**列（经 Value() 取值）——白名单
+// 同样只收字段名对应的单列。
+var valuerType = reflect.TypeOf((*driver.Valuer)(nil)).Elem()
+
+// collectEntityColumnsWithPrefix 递归收集结构体字段的「别名 → 规范化列名」，
+// prefix 是外层嵌入链累积的 embeddedPrefix（gorm 语义：内层列名 = 前缀 +
+// 内层列名，column tag 也被加前缀）。
+//
+// 嵌入判定对齐 gorm schema.ParseField（v1.31.2）：
+//   - 显式 `gorm:"embedded"`（具名字段/匿名皆可）⇒ 嵌入，展开内层字段；
+//   - 匿名结构体且非 time.Time、未实现 driver.Valuer ⇒ 嵌入，展开内层字段；
+//   - 匿名 time.Time / Valuer / 非结构体 ⇒ 不嵌入，gorm 按字段名建**单列**
+//     （如匿名 time.Time → 列 "time"），白名单同样只收该单列；
+//   - 显式 embedded 的 time.Time（内层全非导出，展开后无列）/ 非结构体
+//     （gorm 报 invalid embedded struct）⇒ 无列，跳过。
+//
+// seen 按类型防环；同一类型以多个不同前缀重复嵌入时只收首个前缀下的列
+// （gorm 侧同类型多前缀嵌入会产生同名/重复列，本身不是合法 schema）。
+func collectEntityColumnsWithPrefix(t reflect.Type, cols map[string]string, seen map[reflect.Type]struct{}, prefix string) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -440,28 +463,43 @@ func collectEntityColumns(t reflect.Type, cols map[string]string, seen map[refle
 		return
 	}
 	seen[t] = struct{}{}
+	timeType := reflect.TypeOf(time.Time{})
 	for i := 0; i < t.NumField(); i++ {
 		f := t.Field(i)
 		if f.PkgPath != "" {
 			// 非导出字段：不是 DB 列，不进白名单。
 			continue
 		}
-		if f.Anonymous {
+		gormTag := f.Tag.Get("gorm")
+		if gormSkipField(gormTag) {
+			// gorm:"-" / gorm:"-:all"：字段整体忽略（不可读写），不是 DB 列。
+			continue
+		}
+		embeddedByTag := gormHasOption(gormTag, "embedded")
+		if f.Anonymous || embeddedByTag {
 			ft := f.Type
 			for ft.Kind() == reflect.Pointer {
 				ft = ft.Elem()
 			}
-			if ft.Kind() == reflect.Struct && ft != reflect.TypeOf(time.Time{}) {
-				collectEntityColumns(ft, cols, seen)
+			if ft.Kind() == reflect.Struct && ft != timeType &&
+				(embeddedByTag || !reflect.PointerTo(ft).Implements(valuerType)) {
+				// 嵌入结构体：gorm 只提升内层字段，类型本身不是列（#175）——
+				// 递归收内层并 continue，嵌入类型名不再入表。
+				collectEntityColumnsWithPrefix(ft, cols, seen, prefix+gormOptionValue(gormTag, "embeddedPrefix"))
+				continue
 			}
+			if embeddedByTag {
+				// 显式 embedded 的 time.Time / 非结构体：gorm 侧无可用列。
+				continue
+			}
+			// 匿名且未声明 embedded 的 time.Time / Valuer / 非结构体：
+			// gorm 按字段名建单列 → 落到下方通用单列收集。
 		}
 		// 规范化列名：gorm `column:` tag 优先；无 tag 套 NamingStrategy 蛇形
 		// 转换（与 gorm 建表时的真列名对齐，#165）。
-		col := snakeColumn(f.Name)
-		if tag, ok := f.Tag.Lookup("gorm"); ok {
-			if c := gormColumnTag(tag); c != "" {
-				col = c
-			}
+		col := prefix + snakeColumn(f.Name)
+		if c := gormColumnTag(gormTag); c != "" {
+			col = prefix + c
 		}
 		addColumn(cols, col, col)
 		if tag, ok := f.Tag.Lookup("json"); ok {
@@ -559,6 +597,63 @@ func gormColumnTag(tag string) string {
 		}
 	}
 	return ""
+}
+
+// gormHasOption 判断 gorm tag 是否声明了某选项（形如 `gorm:"embedded;embeddedPrefix:au_"`
+// 中的 "embedded"）。与 gorm 的 TagSettings 口径一致：分号分隔，选项名不区分大小写，
+// 带值/不带值都算声明（gorm 对 EMBEDDED 无论是否带值都视为声明）。
+func gormHasOption(tag, option string) bool {
+	for _, part := range strings.Split(tag, ";") {
+		part = strings.TrimSpace(part)
+		if key, _, found := strings.Cut(part, ":"); found {
+			if strings.EqualFold(strings.TrimSpace(key), option) {
+				return true
+			}
+			continue
+		}
+		if strings.EqualFold(part, option) {
+			return true
+		}
+	}
+	return false
+}
+
+// gormOptionValue 取 gorm tag 中某选项的值（无则空串）。
+// 形如 `gorm:"embedded;embeddedPrefix:author_"` 中 embeddedPrefix → "author_"。
+// 值内的 ":" 按 gorm ParseTagSetting 的口径保留（Join(values[1:], ":")）。
+func gormOptionValue(tag, option string) string {
+	for _, part := range strings.Split(tag, ";") {
+		part = strings.TrimSpace(part)
+		key, rest, found := strings.Cut(part, ":")
+		if found && strings.EqualFold(strings.TrimSpace(key), option) {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
+}
+
+// gormSkipField 判断 gorm tag 是否整体忽略字段：`gorm:"-"` / `gorm:"-:all"`
+// 使字段不可读写（DataType 置空），gorm 不为其建列——白名单同样跳过；
+// `gorm:"-:migration"` 只是不参与建表迁移，字段仍是可读写的真实列，不跳过。
+// 值口径与 gorm 一致（小写 + 去空白后等于 "-" 或 "all"；裸 "-" 的值即 "-"，
+// 见 ParseTagSetting 对无值选项 settings[k]=k 的处理）。
+func gormSkipField(tag string) bool {
+	for _, part := range strings.Split(tag, ";") {
+		part = strings.TrimSpace(part)
+		key, val, found := strings.Cut(part, ":")
+		if !strings.EqualFold(strings.TrimSpace(key), "-") {
+			continue
+		}
+		if !found {
+			val = "-"
+		}
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "-", "all":
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // deriveIDParam 按路由模板推导路径参数名：取标准 CRUD 的 Get/Update/Delete

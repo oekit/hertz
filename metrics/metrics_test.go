@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/test/assert"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/prometheus/client_golang/prometheus"
@@ -97,4 +98,67 @@ func TestMetricsHandler_GzipNegotiation(t *testing.T) {
 	if len(resp.Body()) == 0 {
 		t.Error("metrics body is empty")
 	}
+}
+
+// --- #176 回归：多值响应头逐值保留（Set→首值 + Add 其余）；MetricsHandlerFor(nil)
+// 构造期 fail-fast ---
+
+// TestHertzResponseWriter_MultiValueHeadersPreserved 钉住：http.ResponseWriter
+// 契约允许 Header().Add 同名多值（Vary / Cache-Control / Set-Cookie），倒进
+// hertz 响应头时不得被 Set 逐值覆盖成一个。
+func TestHertzResponseWriter_MultiValueHeadersPreserved(t *testing.T) {
+	c := app.NewContext(0)
+	w := newHertzResponseWriter(c)
+	w.Header().Add("Vary", "Accept-Encoding")
+	w.Header().Add("Vary", "Accept")
+	w.Header().Add("Cache-Control", "no-store")
+	w.Header().Add("Cache-Control", "no-cache")
+	w.Header().Add("Cache-Control", "must-revalidate")
+	_, _ = w.Write([]byte("x"))
+
+	assert.DeepEqual(t, []string{"Accept-Encoding", "Accept"}, c.Response.Header.GetAll("Vary"))
+	assert.DeepEqual(t, []string{"no-store", "no-cache", "must-revalidate"}, c.Response.Header.GetAll("Cache-Control"))
+}
+
+// TestHertzResponseWriter_FirstValueSetRestAdd 钉住语义口径：首个值用 Set
+// （覆盖 hertz 侧已有同名头），其余 Add——hertz 侧预置的同名头不得残留叠放。
+func TestHertzResponseWriter_FirstValueSetRestAdd(t *testing.T) {
+	c := app.NewContext(0)
+	c.Response.Header.Set("X-Preexisting", "stale")
+	w := newHertzResponseWriter(c)
+	w.Header().Add("X-Preexisting", "fresh-1")
+	w.Header().Add("X-Preexisting", "fresh-2")
+	_, _ = w.Write(nil)
+
+	assert.DeepEqual(t, []string{"fresh-1", "fresh-2"}, c.Response.Header.GetAll("X-Preexisting"))
+}
+
+// TestHertzResponseWriter_FlushHeadersIdempotent written 后再 Write 不得重复倒头
+// （多值头尤其会翻倍）。
+func TestHertzResponseWriter_FlushHeadersIdempotent(t *testing.T) {
+	c := app.NewContext(0)
+	w := newHertzResponseWriter(c)
+	w.Header().Add("Vary", "Accept-Encoding")
+	w.Header().Add("Vary", "Accept")
+	_, _ = w.Write([]byte("x"))
+	w.flushHeaders()
+
+	assert.DeepEqual(t, []string{"Accept-Encoding", "Accept"}, c.Response.Header.GetAll("Vary"))
+}
+
+// TestMetricsHandlerFor_NilGathererPanics 钉住：nil Gatherer 属构造期配置错误，
+// 构造即 panic（fail-fast）——绝不返回一个「每个请求都 nil 解引用 panic」的
+// handler（本仓 nns.NewRegistry 同一口径）。
+func TestMetricsHandlerFor_NilGathererPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("MetricsHandlerFor(nil) must panic at construction time")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "non-nil gatherer") {
+			t.Errorf("panic value = %v, want message mentioning non-nil gatherer", r)
+		}
+	}()
+	_ = MetricsHandlerFor(nil)
 }
