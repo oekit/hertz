@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/app/server/registry"
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
 	standard "github.com/cloudwego/hertz/pkg/network/standard"
@@ -162,38 +163,122 @@ func TestRunServer_ToleratesEngineNotRunning(t *testing.T) {
 }
 
 // TestShutdownErrTolerable_StateNotText 是 #166 的核心回归：容忍判定按
-// engine 状态而非 "engine is not running" 文案。
-//   - 非 running：任何错误（含措辞随机的错误）都容忍——双路关闭竞争；
-//   - running：任何错误都不容忍——排空超时等真失败必须上抛。
+// **进入关闭回调时采样**的 engine 状态而非 "engine is not running" 文案。
+//   - 进回调时已非 running（wasRunning=false）：任何错误（含措辞随机的
+//     错误）都容忍——双路关闭竞争的败者；
+//   - 进回调时仍 running（wasRunning=true）：任何错误都不容忍——首发关停
+//     路自己产生的真失败必须上抛；
+//   - err == nil：恒容忍。
 //
-// 修复前按文本匹配：hertz 改措辞 ⇒ 非 running 的良性错误被当成真失败。
+// #179：判定变量必须是**先于 Shutdown 采样**的状态。hertz v0.10.6 Shutdown
+// 先 CAS 翻状态再干活（Deregister 失败等真错误返回时 status 必已离开
+// running），事后采样 IsRunning() 恒为 false——旧签名 shutdownErrTolerable
+// (h, err) 在 Shutdown 之后取 h.IsRunning()，判据第二项恒真，把所有真失败
+// 当成功吞掉。
 func TestShutdownErrTolerable_StateNotText(t *testing.T) {
-	// 非 running（从未启动）：错误容忍。
-	idle := server.New(server.WithHostPorts(":0"))
-	if idle.IsRunning() {
-		t.Fatal("idle engine must not be running")
-	}
-	if !shutdownErrTolerable(idle, errors.New("engine has stopped dancing")) {
-		t.Error("non-running engine: benign race error must be tolerated regardless of text")
+	// 双路竞争败者（进回调时 engine 已停）：任意错误容忍。
+	if !shutdownErrTolerable(false, errors.New("engine has stopped dancing")) {
+		t.Error("race loser (not running at entry): benign race error must be tolerated regardless of text")
 	}
 
-	// running（真启动监听）：错误不容忍。
-	live := server.New(server.WithHostPorts(":0"))
-	async.GoSafe(func() { _ = live.Run() })
+	// 首发关停路（进回调时 engine 仍 running）：真失败必须上抛。
+	if shutdownErrTolerable(true, errors.New("nacos deregister failed: connection refused")) {
+		t.Error("first shutdown initiator: real failure (deregister/drain) must propagate")
+	}
+
+	// 无错误：恒容忍，与状态无关。
+	if !shutdownErrTolerable(true, nil) || !shutdownErrTolerable(false, nil) {
+		t.Error("nil error must always be tolerated")
+	}
+}
+
+// failDeregRegistry 是 Deregister 必败的注册中心（#179 回归场景：关停期
+// 注销失败=实例泄漏，必须对 shutdown.Manager 可见，而不是被当成功吞掉）。
+type failDeregRegistry struct{}
+
+func (f *failDeregRegistry) Register(info *registry.Info) error { return nil }
+
+func (f *failDeregRegistry) Deregister(info *registry.Info) error {
+	return errors.New("nacos deregister failed: connection refused")
+}
+
+// TestRunServer_ShutdownRealErrorPropagates 是 #179 的核心回归：engine 仍
+// running 时首发关停（进回调采样 wasRunning=true），挂 Deregister 必败的
+// Registry，h.Shutdown 返回真错误——关闭回调必须把它上抛给 shutdown.Manager。
+// #166 修复后（#179 修复前）的实现事后采样 IsRunning()：真错误返回时刻
+// status 必已离开 running（hertz Shutdown 先 CAS 翻状态后干活），判据恒真，
+// 该真失败被当成功吞掉、closer 返回 nil。
+func TestRunServer_ShutdownRealErrorPropagates(t *testing.T) {
+	fa := newFakeApp()
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithExitWaitTime(100*time.Millisecond),
+		server.WithRegistry(&failDeregRegistry{}, &registry.Info{ServiceName: "dereg-fail-svc"}),
+	)
+	RunServer(fa, "dereg-fail-hertz", h)
+	closer, ok := fa.closers["dereg-fail-hertz"]
+	if !ok {
+		t.Fatal("RunServer did not register close resource")
+	}
+
+	// RunServer 的 GoBackground 已在后台启动 engine：等它进入 running，
+	// 确保 closer 进场时 engine 仍 running（首发关停路）
 	deadline := time.Now().Add(5 * time.Second)
-	for !live.IsRunning() {
+	for !h.IsRunning() {
 		if time.Now().After(deadline) {
 			t.Fatal("live engine never reached running state")
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_ = live.Shutdown(ctx)
-	}()
-	if shutdownErrTolerable(live, errors.New("shutdown deadline exceeded")) {
-		t.Error("running engine: real shutdown failure must propagate")
+
+	err := closer(context.Background())
+	if err == nil {
+		t.Fatal("real shutdown failure (registry deregister failed) must propagate to shutdown.Manager, got nil")
+	}
+	if !strings.Contains(err.Error(), "deregister failed") {
+		t.Fatalf("propagated error should be the registry failure, got: %v", err)
+	}
+}
+
+// TestRunServer_RaceLoserTolerated 是 #166 良性竞争的**可达模型**回归：
+// engine 真跑起来后被先行关停路停掉，bootstrap 关闭回调作为败者进场——
+// 进回调时已非 running（wasRunning=false），Shutdown 必得 hertz 私有的
+// errStatusNotRunning，必须按成功处理返回 nil。旧测试给 live engine 喂
+// 合成错误验证的是不可达状态（running 时 Shutdown 返回错误在 hertz 实现
+// 里不存在）；本测试走真实双路时序。
+func TestRunServer_RaceLoserTolerated(t *testing.T) {
+	fa := newFakeApp()
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithExitWaitTime(100*time.Millisecond),
+	)
+	RunServer(fa, "race-loser-hertz", h)
+	closer, ok := fa.closers["race-loser-hertz"]
+	if !ok {
+		t.Fatal("RunServer did not register close resource")
+	}
+
+	// RunServer 的 GoBackground 已在后台启动 engine：等它进入 running
+	deadline := time.Now().Add(5 * time.Second)
+	for !h.IsRunning() {
+		if time.Now().After(deadline) {
+			t.Fatal("live engine never reached running state")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	// 先行关停路：engine 真实优雅关停（状态翻转为非 running）
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := h.Shutdown(ctx); err != nil {
+		t.Fatalf("first-path shutdown failed: %v", err)
+	}
+
+	// 败者路：进回调时 engine 已非 running，errStatusNotRunning 容忍为 nil
+	if err := closer(context.Background()); err != nil {
+		t.Fatalf("race loser (engine stopped at entry) must be tolerated, got: %v", err)
 	}
 }
 

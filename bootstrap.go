@@ -97,16 +97,18 @@ func WithReadyProbeTimeout(d time.Duration) RunServerOption {
 //
 // # 关闭语义（对照官方 graceful-shutdown 文档）
 //
-// 信号路径：SIGTERM/SIGINT（SIGHUP 未被忽略时含之）由 h.Run() 内置 waitSignal
-// 处理，直接触发 h.Shutdown(context.Background())，排空上限为
+// 信号路径：SIGTERM/SIGINT（SIGHUP 未被忽略时含之）由 bootstrap 的关停序列
+// 触发本函数注册的关闭回调，回调内调 h.Shutdown(ctx)，排空上限为
 // server.WithExitWaitTime（**默认 5s** — hertz 官方默认;未配时 netpoll 1s ticker
-// 检 active conn / go net 立即关 listen）。同一信号也会让 bootstrap 走本函数注册的
-// 关闭回调，第二次 Shutdown 时 engine 已非 running（可能返回 hertz 私有的
-// errStatusNotRunning 错误）——这是双路关闭的良性竞争而非故障，此处按
-// engine 状态判定（#166：IsRunning()==false 即视为双路良性，按成功处理，
-// 不做错误文本匹配——hertz 未导出该 sentinel、文案无兼容承诺），避免每次
-// 信号关机都产生假错误日志。engine 仍在 running 时 Shutdown 的错误
-// （排空超时等真失败）照常上抛。
+// 检 active conn / go net 立即关 listen）。若另有先行关停路（调用方自行
+// Spin/Shutdown）已把 engine 停掉，本回调的 Shutdown 必得 hertz 私有的
+// errStatusNotRunning 错误——这是双路关闭的良性竞争而非故障，按**进入回调
+// 时**采样的 engine 状态判定（#166：进回调时已非 running 即视为双路良性
+// 败者，按成功处理，不做错误文本匹配——hertz 未导出该 sentinel、文案无
+// 兼容承诺；#179：必须在调 Shutdown **之前**采样，hertz Shutdown 先翻状态
+// 后干活，事后采样 IsRunning() 恒为 false，会把真实关停失败一并吞掉）。
+// 首发关停路自己产生的错误（注册中心注销失败、排空超时等真失败）照常
+// 上抛，shutdown.Manager 可见。
 //
 // 程序化路径（userFn 返回 / RequestShutdown）：走本函数注册的关闭回调，
 // ctx 为 bootstrap 单资源预算（shutdown.New 的 defaultTimeout）；hertz 内部
@@ -139,7 +141,18 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 	}
 
 	app.AddResource(name, func(ctx context.Context) error {
-		if err := h.Shutdown(ctx); !shutdownErrTolerable(h, err) {
+		// #179：**进入回调先采样** engine 状态。hertz Shutdown 的实现顺序是
+		// 「入口判状态非 running 即返回 errStatusNotRunning → CAS 翻状态 →
+		// 再干活（Registry.Deregister 失败 / transport.Shutdown 非 ctx.Err
+		// 的错误均上抛）」——任何从 Shutdown 返回的真错误产生时 status 必已
+		// 离开 running。若事后采样 IsRunning()（#166 的做法），判据第二项
+		// 恒真 ⇒ 所有真实关停失败（注册中心注销失败=实例泄漏等）都被当成功
+		// 吞掉。进回调时 engine 已非 running 才是双路竞争败者（#166）的
+		// 真判定：此时本路 Shutdown 必得 errStatusNotRunning，按成功处理；
+		// 首发关停路自己产生的错误一律上抛，shutdown.Manager 可见。
+		wasRunning := h.IsRunning()
+		err := h.Shutdown(ctx)
+		if err != nil && !shutdownErrTolerable(wasRunning, err) {
 			return err
 		}
 		return nil
@@ -195,17 +208,25 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 	})
 }
 
-// shutdownErrTolerable 判定双路关闭竞争下 h.Shutdown 的错误是否可容忍（#166）。
+// shutdownErrTolerable 判定双路关闭竞争下 h.Shutdown 的错误是否可容忍
+// （#166 / #179）。
 //
-// 信号关机时 bootstrap 与 h.Run() 内置 waitSignal 双路并发 Shutdown，后到者
-// 因 engine 已非 running 而得到错误（hertz 私有 errStatusNotRunning）——这是
-// 良性竞争而非故障。判定按 engine **状态**而非错误文本：err == nil 恒容忍；
-// engine 已非 running 时任何错误都视为双路竞争的产物（hertz 未导出该
-// sentinel、文案无兼容承诺，文本匹配会在上游改措辞时把每次信号关机变成
-// 假故障）；engine 仍在 running 时的错误（排空超时等真失败）不容忍，照常
-// 上抛。
-func shutdownErrTolerable(h *server.Hertz, err error) bool {
-	return err == nil || !h.IsRunning()
+// 判定变量是**进入关闭回调时采样**的 engine 状态（wasRunning），不是事后
+// 状态：hertz v0.10.6 Shutdown 先 CAS 翻状态再干活，任何真错误
+// （Registry.Deregister 失败、transport.Shutdown 非 ctx.Err 的错误等）返回
+// 时 status 必已离开 running——事后采样 IsRunning() 恒为 false，会把所有
+// 真失败判成良性（#179）。
+//
+//   - err == nil：恒容忍（本来就没失败）；
+//   - wasRunning == false：本路是双路关闭竞争的败者——engine 已被先行关停
+//     路停掉，本路 Shutdown 必得 hertz 私有的 errStatusNotRunning，属良性
+//     竞争而非故障，容忍任意错误（不做错误文本匹配：hertz 未导出该
+//     sentinel、文案无兼容承诺，文本匹配会在上游改措辞时把每次信号关机
+//     变成假故障）；
+//   - wasRunning == true：本路是首发关停路，自己发起的关停产生的错误
+//     （注册中心注销失败、排空超时等真失败）一律不容忍，照常上抛。
+func shutdownErrTolerable(wasRunning bool, err error) bool {
+	return err == nil || !wasRunning
 }
 
 // probeAndReady 循环 TCP dial 探活监听地址，可建连后执行 onReady。
