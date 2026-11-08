@@ -69,12 +69,32 @@ func newNativeStaticConfig(prefix string, opts ...NativeStaticOption) nativeStat
 
 // resolveNativeStaticPath 把请求路径折算成 fsys 内的相对路径。
 //
-// ok=false 表示路径非法（穿越/空段/非规范形态）；name 可能为空串，含义是
-// **fsys 根**——普通静态 handler 视为 miss（根不是文件），SPA handler 视为
-// 「交给 index」。两者对空串的态度不同，故由调用方判。
+// prefix 必须落在**路径段边界**上：剥挂载前缀后余串必须以 "/" 开头或为空，
+// 否则按 miss 处理（#170）。TrimPrefix 不校验边界会把 "/staticfoo/a.js" 的
+// "/static" 剥成 "foo/a.js"——该路径与 "/static/a.js" 解析到同一 fsys 文件，
+// 产生未声明的别名路径（缓存键/审计路径口径分裂）。精确路由
+// "/static/*filepath" 下不可达，但 prefix 非空 + catch-all 兜底路由（SPA
+// 根挂载形态）组合完全可能。
+//
+// ok=false 表示路径非法（穿越/空段/非规范形态/前缀未落在段边界）；name
+// 可能为空串，含义是**fsys 根**——普通静态 handler 视为 miss（根不是文件），
+// SPA handler 视为「交给 index」。两者对空串的态度不同，故由调用方判。
 func resolveNativeStaticPath(c *app.RequestContext, cfg nativeStaticConfig) (string, bool) {
-	name := strings.TrimPrefix(string(c.Path()), "/"+cfg.prefix)
-	name = strings.TrimPrefix(name, "/")
+	p := string(c.Path())
+	rest := p
+	if cfg.prefix != "" {
+		mount := "/" + cfg.prefix
+		if !strings.HasPrefix(p, mount) {
+			return "", false
+		}
+		rest = p[len(mount):]
+		if rest != "" && !strings.HasPrefix(rest, "/") {
+			// 前缀没落在段边界（/staticfoo 相对 /static）：按 miss，
+			// 不把半段折算进 fsys（别名路径分裂缓存键与审计口径）
+			return "", false
+		}
+	}
+	name := strings.TrimPrefix(rest, "/")
 	if name == "" {
 		return "", true
 	}

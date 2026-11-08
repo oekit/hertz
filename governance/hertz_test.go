@@ -111,15 +111,20 @@ func TestLimiterMiddleware_DynamicPolicy(t *testing.T) {
 		t.Errorf("over-rate = %v, want 429,429", codes[2:])
 	}
 
-	// 策略更新:rate=1 burst=1 → 立即按新策略(第一发 200,第二发 429)
-	cfg2, _ := governance.Parse([]byte(`{"limiter":{"POST:/order":{"rate":1,"burst":1}}}`))
+	// 策略更新(#169):只换 policy 参数,桶态保留——此刻桶已被打空(tokens≈0),
+	// 切换瞬间不得凭空补满放行(旧实现把 tokens 重置为新 Rate,等价突发放行);
+	// 等新速率自然补满(r=10/s,睡 150ms ≈ 1.5 token,burst=1 钳到 1)才放行
+	cfg2, _ := governance.Parse([]byte(`{"limiter":{"POST:/order":{"rate":10,"burst":1}}}`))
 	store.Update(cfg2)
-	time.Sleep(20 * time.Millisecond) // 确保至少 1 token 补充
+	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 429 {
+		t.Errorf("right after policy switch = %d, want 429 (bucket state must be preserved, not reset)", w.Code)
+	}
+	time.Sleep(150 * time.Millisecond) // 按 rate=10 自然补满
 	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 200 {
-		t.Errorf("after policy update first = %d, want 200", w.Code)
+		t.Errorf("after natural refill = %d, want 200 (new policy must take effect)", w.Code)
 	}
 	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 429 {
-		t.Errorf("after policy update second = %d, want 429 (burst=1)", w.Code)
+		t.Errorf("after refill second = %d, want 429 (burst=1)", w.Code)
 	}
 }
 
@@ -227,4 +232,125 @@ func TestLimiterMiddleware_ConcurrentUpdateRace(t *testing.T) {
 	}
 	wg.Wait()
 	<-done
+}
+
+// ==================== 快照代际合并（#169） ====================
+
+// TestApplySnapshot_GenerationMatrix 表驱动钉住快照→桶的合并规则：
+// 只有**新于**桶代际的快照才允许改写策略（单向推进），且改写只换 policy
+// 参数、tokens/last 保留。旧实现按策略值比较改写：热更窗口内拿到旧快照的
+// 迟到请求把已收敛的桶整桶回退 + tokens 清零重置，flap 窗口内反复发生
+// 等价一次突发放行。
+func TestApplySnapshot_GenerationMatrix(t *testing.T) {
+	p1 := governance.LimiterPolicy{Rate: 1, Burst: 1}
+	p2 := governance.LimiterPolicy{Rate: 5, Burst: 5}
+
+	tests := []struct {
+		name      string
+		bucketGen int64
+		bucketPol governance.LimiterPolicy
+		snapGen   int64
+		snapPol   governance.LimiterPolicy
+		wantPol   governance.LimiterPolicy
+		wantGen   int64
+	}{
+		{
+			name:      "newer snapshot adopts policy",
+			bucketGen: 1, bucketPol: p1,
+			snapGen: 2, snapPol: p2,
+			wantPol: p2, wantGen: 2,
+		},
+		{
+			// #169 回归：热更（P1→P2）后拿到 P1 快照的迟到请求不得把桶回退
+			name:      "stale snapshot cannot roll back policy",
+			bucketGen: 2, bucketPol: p2,
+			snapGen: 1, snapPol: p1,
+			wantPol: p2, wantGen: 2,
+		},
+		{
+			// 同代际重放（快照与桶同代）无事可做
+			name:      "equal generation is a no-op",
+			bucketGen: 2, bucketPol: p2,
+			snapGen: 2, snapPol: p2,
+			wantPol: p2, wantGen: 2,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &bucket{gen: tt.bucketGen, policy: tt.bucketPol, tokens: 0.4, last: time.Now()}
+			applySnapshot(b, tt.snapPol, tt.snapGen)
+
+			b.mu.Lock()
+			gotPol, gotGen, gotTokens := b.policy, b.gen, b.tokens
+			b.mu.Unlock()
+
+			if gotPol != tt.wantPol {
+				t.Errorf("policy = %+v, want %+v", gotPol, tt.wantPol)
+			}
+			if gotGen != tt.wantGen {
+				t.Errorf("gen = %d, want %d", gotGen, tt.wantGen)
+			}
+			// 桶态保留是本次修复的核心口径：清零重置等价突发放行
+			if gotTokens != 0.4 {
+				t.Errorf("tokens = %v, want 0.4 (bucket state must survive policy swap)", gotTokens)
+			}
+		})
+	}
+}
+
+// TestApplySnapshot_NewerSnapshotKeepsTokens 策略改写只换参数：桶内已积累
+// 的状态（含已消耗后的余量）不因配置切换被凭空补满。
+func TestApplySnapshot_NewerSnapshotKeepsTokens(t *testing.T) {
+	pOld := governance.LimiterPolicy{Rate: 100, Burst: 100}
+	pNew := governance.LimiterPolicy{Rate: 1, Burst: 1}
+	b := &bucket{gen: 1, policy: pOld, tokens: 37.5, last: time.Now()}
+
+	applySnapshot(b, pNew, 2)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.tokens != 37.5 {
+		t.Errorf("tokens = %v, want 37.5 (switching to a smaller policy must not refill the bucket)", b.tokens)
+	}
+	if b.policy != pNew {
+		t.Errorf("policy = %+v, want %+v", b.policy, pNew)
+	}
+}
+
+// TestLimiterMiddleware_PolicySwitchNoFreeRefill 回归 #169（行为级）：热更
+// 切换瞬间桶态保留——已被打空的桶不会因换策略被重置补满（旧实现 tokens
+// 重置为新 Rate，配置 flap 窗口内反复清零等价突发放行）。
+func TestLimiterMiddleware_PolicySwitchNoFreeRefill(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg1, _ := governance.Parse([]byte(`{"limiter":{"POST:/order":{"rate":1,"burst":1}}}`))
+	store.Update(cfg1)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewLimiterMiddleware(store))
+	h.POST("/order", func(_ context.Context, c *app.RequestContext) {
+		c.String(200, "ok")
+	})
+
+	// gen1: 打空桶（满桶放行一发，随后 429）
+	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 200 {
+		t.Fatalf("first request = %d, want 200", w.Code)
+	}
+	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 429 {
+		t.Fatalf("second request = %d, want 429 (bucket drained)", w.Code)
+	}
+
+	// gen2: 调大策略（rate=10 burst=1000）——切换瞬间不得凭空放行：
+	// tokens≈0 保留，新速率需 ~100ms 才补满 1 个
+	cfg2, _ := governance.Parse([]byte(`{"limiter":{"POST:/order":{"rate":10,"burst":1000}}}`))
+	store.Update(cfg2)
+	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 429 {
+		t.Errorf("right after policy switch = %d, want 429 (no free refill on policy change)", w.Code)
+	}
+	time.Sleep(150 * time.Millisecond) // rate=10/s → ≥1 token
+	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 200 {
+		t.Errorf("after natural refill = %d, want 200 (new policy governs refill)", w.Code)
+	}
 }

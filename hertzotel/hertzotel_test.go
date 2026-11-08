@@ -163,3 +163,105 @@ func TestNewServerMiddleware_WithServerTracer_NoDiagnostic(t *testing.T) {
 		t.Errorf("must not diagnose when a server tracer is installed (warned %d times)", warned)
 	}
 }
+
+// TestNewServerMiddleware_MissingTracerMatrix 钉住缺失诊断的判据矩阵（#168）：
+// 「engine 未装 otel server tracer」不能用 GetTraceInfo()==nil 判——hertz
+// v0.10.6 起只要 engine 挂了**任意** tracer（stats/自研 tracer 实现同一接口）
+// 就给 RequestContext 预置 TraceInfo，混合装配（有别的 tracer、缺的恰是 otel
+// tracer）下旧判据恒不触发，半截 span 哑火照样发生而警告永不出现。修复后
+// 判据为「TraceInfo 缺失（零 tracer）‖ 进程从未创建过 otel server tracer」。
+func TestNewServerMiddleware_MissingTracerMatrix(t *testing.T) {
+	origWarn := missingServerTracerWarn
+	origCreated := serverTracerCreated.Load()
+	defer func() {
+		missingServerTracerWarn = origWarn
+		serverTracerCreated.Store(origCreated)
+	}()
+
+	tests := []struct {
+		name           string
+		traceInfo      bool // engine 挂了任意 tracer ⇒ RequestContext 预置 TraceInfo
+		otelCreated    bool // 进程经 NewServerTracer/NewServerTracing 创建过 otel server tracer
+		wantDiagnostic bool
+	}{
+		{
+			name:           "zero tracer engine, otel never created",
+			traceInfo:      false,
+			otelCreated:    false,
+			wantDiagnostic: true,
+		},
+		{
+			// #168 回归：混合装配（engine 有非 otel tracer）+ otel tracer
+			// 缺失——旧判据 GetTraceInfo()==nil 在此恒 false，哑火无告警
+			name:           "mixed assembly: other tracer present, otel never created",
+			traceInfo:      true,
+			otelCreated:    false,
+			wantDiagnostic: true,
+		},
+		{
+			name:           "paired install: otel tracer created",
+			traceInfo:      true,
+			otelCreated:    true,
+			wantDiagnostic: false,
+		},
+		{
+			// 进程别处配过 otel tracer，本 engine 零 tracer：TraceInfo
+			// 缺失这半边判据独立兜住（进程级状态覆盖不到的场景）
+			name:           "zero tracer engine, otel created elsewhere",
+			traceInfo:      false,
+			otelCreated:    true,
+			wantDiagnostic: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var warned int
+			missingServerTracerWarn = func() { warned++ }
+			serverTracerCreated.Store(tt.otelCreated)
+
+			mw := NewServerMiddleware()
+			c := app.NewContext(0)
+			c.Request.SetMethod("GET")
+			if tt.traceInfo {
+				c.SetTraceInfo(traceinfo.NewTraceInfo())
+			}
+			chainCalled := false
+			c.SetHandlers(app.HandlersChain{func(ctx context.Context, c *app.RequestContext) {
+				chainCalled = true
+				c.Next(ctx)
+			}})
+			mw(context.Background(), c)
+
+			if tt.wantDiagnostic && warned == 0 {
+				t.Error("expected missing-server-tracer diagnostic, got none")
+			}
+			if !tt.wantDiagnostic && warned != 0 {
+				t.Errorf("unexpected diagnostic (warned %d times)", warned)
+			}
+			if !chainCalled {
+				t.Error("middleware must continue the handler chain")
+			}
+		})
+	}
+}
+
+// TestNewServerTracer_MarksPairedInstallState 钉住：「已配对安装」状态只由
+// NewServerTracer / NewServerTracing 置位——NewServerMiddleware 内部为建
+// 中间件 cfg 也调上游 NewServerTracer，但那份 Option 被丢弃（从未装上
+// engine），不得置位，否则缺失诊断自身哑火。
+func TestNewServerTracer_MarksPairedInstallState(t *testing.T) {
+	origCreated := serverTracerCreated.Load()
+	defer serverTracerCreated.Store(origCreated)
+
+	serverTracerCreated.Store(false)
+	NewServerTracer()
+	if !serverTracerCreated.Load() {
+		t.Error("NewServerTracer must mark the paired-install state (#168)")
+	}
+
+	serverTracerCreated.Store(false)
+	NewServerTracing()
+	if !serverTracerCreated.Load() {
+		t.Error("NewServerTracing must mark the paired-install state (#168)")
+	}
+}
