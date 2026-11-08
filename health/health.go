@@ -343,6 +343,14 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 			async.GoSafe(func() {
 				defer wg.Done()
 				res := CheckResult{Name: checker.Name}
+				// 每个 checker 单独派生 ctx（#171）：超时与否要看**该 checker
+				// 是否真被总超时截断**（DeadlineExceeded），不能用共享 runCtx
+				// 的取消状态推断——探针客户端提前断连（K8s 探针超时砍连接是
+				// 常态）取消的是请求 ctx（Canceled），此刻恰好因真实故障失败的
+				// checker 会被误标 "timeout"，verbose 文案与告警分诊全指向超时；
+				// 父 ctx 取消时 checkerCtx 只携带 Canceled，原始 err 文案保留。
+				checkerCtx, cancelChecker := context.WithCancel(runCtx)
+				defer cancelChecker()
 				// checker panic 就地收编为 error 结果：checkTimeout<=0 路径
 				// 依赖"每个 checker 恰好投递一次"，panic 跳过投递会让
 				// 下面的 <-ch 永久阻塞（/health 挂死）。
@@ -352,9 +360,10 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 							err = fmt.Errorf("checker panic: %v", r)
 						}
 					}()
-					return checker.check(runCtx)
+					return checker.check(checkerCtx)
 				}()
-				status, errText := checkResultStatus(err, runCtx.Err() != nil, verbose)
+				timedOut := checkerCtx.Err() == context.DeadlineExceeded
+				status, errText := checkResultStatus(err, timedOut, verbose)
 				res.Status, res.Error = status, errText
 				if err != nil && status == StatusError {
 					logx.CtxError(runCtx, "health check failed", "name", checker.Name, "err", err)

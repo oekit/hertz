@@ -34,8 +34,12 @@ func routePath(c *app.RequestContext) string {
 	return string(c.Path())
 }
 
-// bucket 是极简令牌桶(policy 变化时整体重建,不做原地扩缩)。
+// bucket 是极简令牌桶:策略热更只原地换 policy 参数(以配置代际单向推进,
+// 见 applySnapshot),桶态(tokens/last)始终保留——清零重置等价突发放行
+// (策略 flap 窗口内桶被反复清零,#169)。tokens 超出新 burst 由 allow 的
+// 上限钳制自然收敛,不需要重建。
 type bucket struct {
+	gen    int64 // 已生效策略的配置代际(store 版本,单调递增)
 	policy governance.LimiterPolicy
 	mu     sync.Mutex
 	tokens float64
@@ -62,8 +66,27 @@ func (b *bucket) allow(now time.Time) bool {
 	return true
 }
 
+// applySnapshot 把一份配置快照(带其发布代际 gen)合并进桶:只有**新于**
+// 桶代际的快照才允许改写策略,且只换 policy 参数、不动 tokens/last。
+//
+// 为什么按代际单向推进(#169):热更窗口内并发请求各自 LoadVersion,快照
+// 新旧不一——旧快照(P1)若按值比较改写桶,会把已收敛到 P2 的桶整桶回退,
+// 并把 tokens 清零重置成 P1.Rate;flap 窗口内反复发生等价一次突发放行。
+// 改为「代际大者为准」后旧快照按桶内现策略执行;新快照改写时保留桶态,
+// 已消耗的配额不因配置切换被凭空补满。
+func applySnapshot(b *bucket, pol governance.LimiterPolicy, gen int64) {
+	// 代际比较与策略替换必须整体持锁:allow 在锁内读 policy,锁外读写构成 data race
+	b.mu.Lock()
+	if gen > b.gen {
+		b.gen = gen
+		b.policy = pol
+	}
+	b.mu.Unlock()
+}
+
 // NewLimiterMiddleware 返回动态限流中间件:按 "METHOD:path" → "path" → ""
-// 从 Store 取 LimiterPolicy,超限返 429。策略变化自动重建桶。
+// 从 Store 取 LimiterPolicy,超限返 429。策略变化按配置代际单向原地生效
+// (旧快照不回退、不清桶态,见 [applySnapshot])。
 //
 // 路径取**路由模板**(见 [routePath])。
 //
@@ -73,21 +96,18 @@ func (b *bucket) allow(now time.Time) bool {
 func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 	var buckets sync.Map // 命中的配置键 → *bucket
 	return func(ctx context.Context, c *app.RequestContext) {
-		pol, key, ok := store.Load().LookupLimiterKey(string(c.Method()), routePath(c))
+		// LoadVersion 一次拿到一致的(配置, 代际)对:代际要与快照同源,
+		// Load()+Version() 两次调用可能拿到「新值配旧代次」的自相矛盾对
+		cfg, gen := store.LoadVersion()
+		pol, key, ok := cfg.LookupLimiterKey(string(c.Method()), routePath(c))
 		if !ok {
 			c.Next(ctx)
 			return
 		}
 		now := time.Now()
-		v, _ := buckets.LoadOrStore(key, &bucket{policy: pol, tokens: float64(pol.Rate), last: now})
+		v, _ := buckets.LoadOrStore(key, &bucket{gen: gen, policy: pol, tokens: float64(pol.Rate), last: now})
 		b := v.(*bucket)
-		// policy 比较与替换必须整体持锁:allow 在锁内读 policy,锁外读构成 data race
-		b.mu.Lock()
-		if b.policy != pol {
-			b.policy = pol
-			b.tokens = float64(pol.Rate)
-		}
-		b.mu.Unlock()
+		applySnapshot(b, pol, gen)
 		if !b.allow(now) {
 			c.AbortWithStatus(http.StatusTooManyRequests)
 			return

@@ -609,6 +609,149 @@ func TestNewHealthHandler_TimeoutStillRedacted(t *testing.T) {
 	}
 }
 
+// ==================== 超时判定逐 checker 化（#171） ====================
+
+// TestNewHealthHandler_ProbeDisconnectTimeoutMatrix 表驱动钉住：/health 的
+// "timeout" 标签必须以**该 checker 自己的 ctx 是否真被总超时截断**
+// （DeadlineExceeded）判定，不能用共享 runCtx 的取消状态推断——探针客户端
+// 提前断连（K8s 探针超时砍连接是常态）取消的是请求 ctx（Canceled），此刻
+// 恰好因真实故障失败的 checker 不得被改标 "timeout"（StatusError 与 503
+// 不变，但 verbose 文案与告警分诊曾全部指向超时）。
+func TestNewHealthHandler_ProbeDisconnectTimeoutMatrix(t *testing.T) {
+	dbErr := errors.New("dial tcp 10.0.0.1:3306: connect: connection refused")
+
+	tests := []struct {
+		name          string
+		disconnected  bool   // 探针断连：请求 ctx 已取消
+		verbose       bool   // WithVerboseErrors 开关
+		checkerErr    error  // checker 返回值（真实故障，不感知 ctx）
+		wantErrorText string // 期望的 CheckResult.Error
+		wantStatus    string // 期望的 CheckResult.Status
+	}{
+		{
+			// #171 回归：断连瞬间的真实故障保留 "check failed" 脱敏文案，
+			// 不再改标 "timeout"（旧实现 runCtx.Err() != nil ⇒ "timeout"）
+			name:          "probe disconnect keeps real failure redacted",
+			disconnected:  true,
+			checkerErr:    dbErr,
+			wantErrorText: "check failed",
+			wantStatus:    "error",
+		},
+		{
+			// 同场景 verbose 模式：原始 err 文案保留，不被超时文案吞掉
+			name:          "probe disconnect keeps real failure verbose",
+			disconnected:  true,
+			verbose:       true,
+			checkerErr:    dbErr,
+			wantErrorText: dbErr.Error(),
+			wantStatus:    "error",
+		},
+		{
+			// 断连但 checker 实际通过：结果不受取消影响
+			name:          "probe disconnect checker passes",
+			disconnected:  true,
+			checkerErr:    nil,
+			wantErrorText: "",
+			wantStatus:    "ok",
+		},
+		{
+			// 基线：无取消时的真实故障照旧脱敏
+			name:          "no cancellation real failure redacted",
+			checkerErr:    dbErr,
+			wantErrorText: "check failed",
+			wantStatus:    "error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var opts []HealthOption
+			opts = append(opts,
+				WithCheckers(NamedChecker("db", func(ctx context.Context) error {
+					return tt.checkerErr
+				})),
+			)
+			if tt.verbose {
+				opts = append(opts, WithVerboseErrors())
+			}
+			handler := NewHealthHandler(opts...)
+
+			// disconnected=true 直接用已取消的父 ctx（探针断连形态：
+			// hertz 收到连接关闭即取消请求 ctx）
+			ctx := context.Background()
+			if tt.disconnected {
+				parent, parentCancel := context.WithCancel(context.Background())
+				parentCancel()
+				ctx = parent
+			}
+
+			c := app.NewContext(0)
+			handler(ctx, c)
+
+			wantCode := consts.StatusOK
+			if tt.wantStatus == "error" {
+				wantCode = consts.StatusServiceUnavailable
+			}
+			if c.Response.StatusCode() != wantCode {
+				t.Fatalf("status = %d, want %d", c.Response.StatusCode(), wantCode)
+			}
+
+			e := mustUnmarshalEnvelope(t, c.Response.Body())
+			var data struct {
+				Checks []struct {
+					Status string `json:"status"`
+					Error  string `json:"error"`
+				} `json:"checks"`
+			}
+			if err := json.Unmarshal(e.Data, &data); err != nil {
+				t.Fatalf("unmarshal data: %v (data=%s)", err, e.Data)
+			}
+			if len(data.Checks) != 1 {
+				t.Fatalf("checks = %d, want 1", len(data.Checks))
+			}
+			if data.Checks[0].Status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", data.Checks[0].Status, tt.wantStatus)
+			}
+			if data.Checks[0].Error != tt.wantErrorText {
+				t.Errorf("error = %q, want %q (timeout label must follow per-checker truncation, not shared ctx cancellation)", data.Checks[0].Error, tt.wantErrorText)
+			}
+		})
+	}
+}
+
+// TestNewHealthHandler_GenuineDeadlineStillTimeout 钉住另一半：真被总超时
+// 截断的 checker（checkerCtx DeadlineExceeded）仍标 "timeout"——#171 收紧
+// 的是「父取消误标」，不是取消超时判定本身。
+func TestNewHealthHandler_GenuineDeadlineStillTimeout(t *testing.T) {
+	// 顺应 ctx 取消的 checker：deadline 到点后返回 ctx 错误
+	slow := NamedChecker("slow", func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+			return nil
+		}
+	})
+	handler := NewHealthHandler(WithCheckers(slow), WithCheckTimeout(50*time.Millisecond))
+	c := app.NewContext(0)
+	handler(context.Background(), c)
+
+	if c.Response.StatusCode() != consts.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", c.Response.StatusCode())
+	}
+	e := mustUnmarshalEnvelope(t, c.Response.Body())
+	var data struct {
+		Checks []struct {
+			Error string `json:"error"`
+		} `json:"checks"`
+	}
+	if err := json.Unmarshal(e.Data, &data); err != nil {
+		t.Fatalf("unmarshal data: %v (data=%s)", err, e.Data)
+	}
+	if len(data.Checks) != 1 || data.Checks[0].Error != "timeout" {
+		t.Errorf("checks = %+v, want error=timeout (genuine deadline truncation)", data.Checks)
+	}
+}
+
 // ==================== 空路径跳过注册（#5） ====================
 
 // TestRegisterHealthRoutes_EmptyPathSkips 空路径 = 跳过该路由注册，
