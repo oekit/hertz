@@ -1,3 +1,9 @@
+## [v0.10.5] — 2026-11-08
+
+- fix(bootstrap): 探活路径 onReady panic 改按启动失败处置（#152）——修复前两处 onReady 调用裸奔在 async.GoSafe 里：panic 沿 probeAndReady 展开，外层「探活失败 ⇒ Error + RequestShutdown」处置整段被跳过，GoSafe recover 后仅记日志 ⇒ server 以「探活已过、回调丢失、永不注册」的半启动形态继续 serve（进程假活，典型形态：延迟 Nacos 注册永不发生）；修复后 panic 在 probeAndReady 内转为 error（callOnReady），走既有探活失败链关停 server，与 probeDisabled 同步路径的「响亮启动失败」同一 panic 政策
+
+关联问题单：hertz#152。
+
 ## [v0.10.4] — 2026-11-08
 
 - build: 依赖地板对齐——本版把 oekit 依赖地板抬到各依赖当前最新已发布版本（matrix-tools/scripts/align_floors.py 维护轮）

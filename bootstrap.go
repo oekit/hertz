@@ -262,8 +262,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
-		cfg.onReady(app.Context())
-		return nil
+		return callOnReady(name, cfg.onReady, app.Context())
 	}
 
 	deadline := time.Now().Add(timeout)
@@ -291,8 +290,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 				return fmt.Errorf("ready probe connected but server is not running, addr=%s", addr)
 			}
 			bootstrapLog.Info("hertz ready probe passed", "name", name, "addr", addr)
-			cfg.onReady(app.Context())
-			return nil
+			return callOnReady(name, cfg.onReady, app.Context())
 		}
 		// 关停优先于超时：ctx 已取消 ⇒ 探活是被正常关停打断，不是启动失败。
 		if ctx.Err() != nil {
@@ -307,4 +305,26 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// callOnReady 执行就绪回调并把 panic 转为 error 返回（#152）。
+//
+// onReady 是就绪/注册动作（典型用途：延迟 Nacos 注册 app.Ready()）——它
+// panic 意味着就绪路径已炸。修复前探活路径的两处 onReady 调用裸奔在
+// async.GoSafe 里：panic 沿 probeAndReady 展开，外层闭包的 err 处置
+// （探活失败 ⇒ Error + RequestShutdown）整段被跳过，GoSafe recover 后
+// 仅记一条日志 ⇒ server 以「探活已过、回调丢失、永不注册」的半启动形态
+// 继续 serve——恰是本模块在别处按致命处置的「进程假活」形态。
+// 探活协程内按探活失败语义收敛：panic → error，走既有失败链
+// （Error 日志 + RequestShutdown）。与 probeDisabled 路径同一 panic 政策：
+// onReady panic = 启动失败，绝不留半启动 server（禁用路径在 GoBackground
+// 之前同步回调，panic 直接传播给 RunServer 调用方，server 尚未启动）。
+func callOnReady(name string, fn func(ctx context.Context), ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("hertz %s onReady panicked: %v", name, r)
+		}
+	}()
+	fn(ctx)
+	return nil
 }
