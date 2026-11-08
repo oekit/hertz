@@ -1,3 +1,14 @@
+## [v0.11.0] — 2026-11-09
+
+- feat(clientip): Resolver 预构造形态——清单缓存化每请求零解析（#174）
+- fix(crudh): 排序白名单展开嵌入字段——gorm.Model 幽灵列消除（#175）
+- fix(metrics): flushHeaders 多值头 Add 保留 + MetricsHandlerFor(nil) 构造期 panic（#176）
+- fix(hertztracer): client 中间件真建 span 注入 trace 上下文（#177）
+- fix(crudh): defaultParseID 支持命名 string 主键（#178）
+- fix(bootstrap): 关停错误先采样再判容忍——真实关停失败不再被吞（#179）
+
+关联问题单：hertz#174、hertz#175、hertz#176、hertz#177、hertz#178、hertz#179。
+
 ## [v0.10.8] — 2026-11-08
 
 - fix(hertzotel): 「engine 未装 server tracer」缺失诊断判据重构（#168）——旧判据 `c.GetTraceInfo() == nil` 在 hertz v0.10.6 判据失效：engine 构造时 enableTrace=true，ctxPool.New 给每个 RequestContext 预置 TraceInfo，只有 initTrace 发现完全没有任何 tracer.Tracer 时才置 false——只要 engine 上还挂着任意非 otel 的 tracer（stats/自研 tracer 实现同一接口），GetTraceInfo() 就非 nil，警告在「混合装配」（有别的 tracer、缺的恰是 otel server tracer）下恒不触发，而 otel carrier（由 otel serverTracer 的 Start 注入）确实缺失，ServerMiddleware 静默不产 span——正是注释宣称要防的「半截 span 哑火」形态。修复后判据为两条任一命中：① TraceInfo 缺失（engine 零 tracer，逐 engine 精确）；② 进程从未经 NewServerTracer/NewServerTracing 创建过 otel server tracer（包级「已配对安装」状态 serverTracerCreated，覆盖混合装配哑火）。NewServerMiddleware 内部为建中间件 cfg 调上游 NewServerTracer 的那份 Option 被丢弃、不置位（否则诊断自身哑火）；NewServerTracing godoc 补挂两个字段必须成对用满的 MustUse 口径。已知局限：进程粒度而非 engine 粒度——多 engine 进程里只要任意 engine 配过本包 tracer，另一台裸 engine 上的哑火探测不到（carrier 类型在上游 internal 包内，请求期无法逐 engine 验证），已在注释钉住。表驱动测试钉住 4 象限判据矩阵（零 tracer / 混合装配 / 已配对 / 别处配过）+ 置位只归两个导出构造器
