@@ -337,11 +337,12 @@ func TestTrustedProxySetFor_Concurrent(t *testing.T) {
 			list := lists[i%len(lists)]
 			c := app.NewContext(0)
 			c.Request.Header.Set("X-Forwarded-For", "1.2.3.4")
-			_ = GetClientIP(c, list)
 			_ = GetClientIPWithXRI(c, list)
 			// 重复调用必须命中缓存且结果一致。
-			if GetClientIP(c, list) != GetClientIP(c, list) {
-				t.Error("inconsistent result across cache hits")
+			first := GetClientIP(c, list)
+			second := GetClientIP(c, list)
+			if first != second {
+				t.Errorf("inconsistent result across cache hits: %q vs %q", first, second)
 			}
 		}(i)
 	}
