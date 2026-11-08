@@ -29,20 +29,40 @@ type sortEntity struct {
 	internal  string
 }
 
-// TestEntityColumns_ReflectsFieldsAndTags 白名单反射：候选列名 = 字段名（小写）
-// + json tag 名（小写）+ gorm column tag 名（小写）。
-//   - 字段名恒为候选（即使 json:"-"——字段仍是 DB 列，只是 API 不暴露）；
-//   - json:"-" 只抑制 json tag 候选（不产生 "-" 候选名）；
+// TestEntityColumns_ReflectsFieldsAndTags 白名单反射（#165）：候选键 =
+// 规范化真列名（gorm column tag 或 NamingStrategy 蛇形转换）+ json tag 名
+// （小写别名），值恒为出 SQL 的规范化列名。
+//   - 无 tag 字段：蛇形真列名是唯一候选——Go 字段名小写不再是候选（它与
+//     蛇形真列名脱节正是 #165 的 5xx 根因）；
+//   - gorm column tag 字段：tag 列名是候选；
+//   - json:"-" 字段：蛇形真列名仍是候选（字段仍是 DB 列，只是 API 不暴露），
+//     且不产生 "-" 这种非法候选名；
 //   - 非导出字段不进白名单（不是 DB 列）。
 func TestEntityColumns_ReflectsFieldsAndTags(t *testing.T) {
 	cols := entityColumns[sortEntity]()
 
-	for _, want := range []string{"id", "name", "created_at", "createdat", "secret", "secret_col"} {
+	for _, want := range []string{"id", "name", "created_at", "secret", "secret_col", "hidden"} {
 		if _, ok := cols[want]; !ok {
 			t.Errorf("column %q missing in reflected set %v", want, cols)
 		}
 	}
-	// json:"-" 的字段名仍是候选，但不得出现 "-" 这种非法列名
+	if _, ok := cols["createdat"]; ok {
+		t.Errorf("Go field name lowercase must not be an alias (#165): %v", cols)
+	}
+	// 别名（json 名）必须映射到规范化真列名，而不是别名本身（#165 核心）
+	for alias, wantCanon := range map[string]string{
+		"id":         "id",
+		"name":       "name",
+		"created_at": "created_at", // json 名与蛇形真列名同形
+		"secret":     "secret_col", // json 名 → gorm column tag 真列名
+		"secret_col": "secret_col",
+		"hidden":     "hidden",
+	} {
+		if got := cols[alias]; got != wantCanon {
+			t.Errorf("alias %q maps to %q, want canonical column %q (set: %v)", alias, got, wantCanon, cols)
+		}
+	}
+	// json:"-" 的字段名仍是候选（真列名），但不得出现 "-" 这种非法列名
 	if _, ok := cols["-"]; ok {
 		t.Errorf("json:\"-\" must not produce a \"-\" column candidate: %v", cols)
 	}

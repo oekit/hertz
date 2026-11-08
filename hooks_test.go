@@ -136,9 +136,10 @@ func TestAddShutdownHook_PreservesOrder(t *testing.T) {
 }
 
 // TestAddShutdownHook_RunShutdownTriggers 集成场景说明:本测试未做 e2e 启动
-// + Shutdown 流程,因为 hertz 在 engine 未 Run 时直接返回 errEngineNotRunning
-// 并跳过 OnShutdown(commit c7cf63f 注释已记);真实 Run + Shutdown 触发路径由
-// bootstrap/app_test.go + examples 中的 e2e 覆盖(本测试不替代)。
+// + Shutdown 流程,因为 hertz 在 engine 未 Run 时直接返回私有的
+// errStatusNotRunning("engine is not running")并跳过 OnShutdown(commit c7cf63f
+// 注释已记);真实 Run + Shutdown 触发路径由 bootstrap/app_test.go + examples
+// 中的 e2e 覆盖(本测试不替代)。
 // helper 本身的行为(append + 手动调 + 多 hook 顺序 + error 不传播)已由前
 // 四个 test 充分覆盖。
 

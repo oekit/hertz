@@ -16,12 +16,6 @@ import (
 
 var bootstrapLog = logx.Delegating("hertz-bootstrap")
 
-// errEngineNotRunning 是 Hertz [server.Hertz.Shutdown] 在 engine 状态非 running
-// （已优雅退出或从未启动）时返回的错误文本（hertz route/engine.go 的
-// errStatusNotRunning = errs.NewPrivate("engine is not running")，hertz 未导出
-// 该 sentinel，只能按文本识别；bootstrap_test.go 有用例钉住该文案）。
-const errEngineNotRunning = "engine is not running"
-
 // defaultReadyProbeTimeout 是 WithOnReady 启用后的默认探活超时。
 const defaultReadyProbeTimeout = 5 * time.Second
 
@@ -107,9 +101,12 @@ func WithReadyProbeTimeout(d time.Duration) RunServerOption {
 // 处理，直接触发 h.Shutdown(context.Background())，排空上限为
 // server.WithExitWaitTime（**默认 5s** — hertz 官方默认;未配时 netpoll 1s ticker
 // 检 active conn / go net 立即关 listen）。同一信号也会让 bootstrap 走本函数注册的
-// 关闭回调，第二次 Shutdown 因 engine 状态已非 running 返回
-// "engine is not running"——这是双路关闭的良性竞争而非故障，此处按成功处理，
-// 避免每次信号关机都产生假错误日志。
+// 关闭回调，第二次 Shutdown 时 engine 已非 running（可能返回 hertz 私有的
+// errStatusNotRunning 错误）——这是双路关闭的良性竞争而非故障，此处按
+// engine 状态判定（#166：IsRunning()==false 即视为双路良性，按成功处理，
+// 不做错误文本匹配——hertz 未导出该 sentinel、文案无兼容承诺），避免每次
+// 信号关机都产生假错误日志。engine 仍在 running 时 Shutdown 的错误
+// （排空超时等真失败）照常上抛。
 //
 // 程序化路径（userFn 返回 / RequestShutdown）：走本函数注册的关闭回调，
 // ctx 为 bootstrap 单资源预算（shutdown.New 的 defaultTimeout）；hertz 内部
@@ -142,8 +139,7 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 	}
 
 	app.AddResource(name, func(ctx context.Context) error {
-		err := h.Shutdown(ctx)
-		if err != nil && err.Error() != errEngineNotRunning {
+		if err := h.Shutdown(ctx); !shutdownErrTolerable(h, err) {
 			return err
 		}
 		return nil
@@ -197,6 +193,19 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 			app.RequestShutdown()
 		}
 	})
+}
+
+// shutdownErrTolerable 判定双路关闭竞争下 h.Shutdown 的错误是否可容忍（#166）。
+//
+// 信号关机时 bootstrap 与 h.Run() 内置 waitSignal 双路并发 Shutdown，后到者
+// 因 engine 已非 running 而得到错误（hertz 私有 errStatusNotRunning）——这是
+// 良性竞争而非故障。判定按 engine **状态**而非错误文本：err == nil 恒容忍；
+// engine 已非 running 时任何错误都视为双路竞争的产物（hertz 未导出该
+// sentinel、文案无兼容承诺，文本匹配会在上游改措辞时把每次信号关机变成
+// 假故障）；engine 仍在 running 时的错误（排空超时等真失败）不容忍，照常
+// 上抛。
+func shutdownErrTolerable(h *server.Hertz, err error) bool {
+	return err == nil || !h.IsRunning()
 }
 
 // probeAndReady 循环 TCP dial 探活监听地址，可建连后执行 onReady。
