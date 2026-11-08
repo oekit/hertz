@@ -33,9 +33,13 @@
 //     迁移位：WithPageNormalization(false) 回到 v0.8.14 逐字口径；
 //     WithListParams(false) 的既有契约不变（忽略参数、恒全量、回显 0）。
 //     可配置缺省/上限：WithDefaultPageSize(n) / WithPageSizeLimit(n)。
-//   - 排序列白名单：缺省按实体类型 T 的字段反射生成（字段名/json tag/
-//     gorm column tag，小写匹配）⇒ 白名单外的列返回 400 "invalid sort
-//     parameter"（此前：任意标识符列都进 ORDER BY，列不存在时 DB 报错 ⇒ 5xx）。
+//   - 排序列白名单：缺省按实体类型 T 的字段反射生成，候选列名与 DB 真实
+//     列名对齐（gorm column tag 或 NamingStrategy 蛇形转换，json tag 名作为
+//     别名放行），出 SQL 恒用规范化列名而非用户原文（#165）⇒ 白名单外的列
+//     返回 400 "invalid sort parameter"（此前 v0.8.14：任意标识符列都进
+//     ORDER BY，列不存在时 DB 报错 ⇒ 5xx；v0.9.0~v0.10.6 的白名单收 Go
+//     字段名小写，无 column tag 字段的蛇形真列名与之脱节，按 json 名排序
+//     依旧 5xx）。
 //     迁移位：WithSortValidation(false) 回到 v0.8.14 的「任意标识符列可排序」。
 //
 // 路径参数名：缺省 "id" 不变；未显式设置时按路由模板首个 ":param" 推导

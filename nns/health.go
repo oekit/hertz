@@ -45,9 +45,10 @@ type InstanceWatcher struct {
 	callbacks  []func(InstanceEvent)
 	stopCh     chan struct{}
 	stopOnce   sync.Once
-	// inflight: serviceName → *atomic.Int32，仍在执行的回调 goroutine 数。
-	// 超时只放弃等待、goroutine 仍在运行；若回调挂死，没有该计数则每轮
-	// tick 都会新增一个泄漏 goroutine，无上限。计数 >0 时跳过本轮派发。
+	// inflight: serviceName → *atomic.Int32，仍在执行的回调 goroutine 数
+	// （回调异步派发，#167）。若回调挂死，没有该计数则每轮 tick 都会新增
+	// 一个泄漏 goroutine，无上限。计数 >0 时跳过本轮派发（cache 不动，
+	// 排空后重 diff 补发，#133）。
 	inflight sync.Map
 }
 
@@ -158,8 +159,8 @@ func (h *InstanceWatcher) checkService(ctx context.Context, serviceName string) 
 		return
 	}
 
-	// 上一轮回调尚未跑完（挂死或超过 5s 超时窗口）时跳过本轮派发，
-	// 防止挂死回调导致 goroutine 与 channel 每轮 tick 无界累积。
+	// 上一轮回调尚未跑完（慢/挂死回调仍在异步执行，#167）时跳过本轮派发，
+	// 防止挂死回调导致 goroutine 每轮 tick 无界累积。
 	// ⚠️ 跳过时**不得更新 cache**（#133）：cache 是 diff 的 prev 基线，若先把
 	// 本轮变更消费进 cache 再跳过派发，回调恢复后下一轮 instancesChanged 必为
 	// false——变更事件被永久吞掉，订阅方（客户端 LB 缓存类）停留在旧实例集且
@@ -195,42 +196,30 @@ func (h *InstanceWatcher) checkService(ctx context.Context, serviceName string) 
 	h.cache[serviceName] = copied
 	h.mu.Unlock()
 
-	// 每个 callback 共用一个超时计时器，循环复用前必须清掉 pending tick，
-	// 否则上一次 fire 的 tick 会让下一次 select 立刻命中误报 timeout。
-	timeoutTimer := time.NewTimer(5 * time.Second)
-	// 第一个 iteration 不需要 drain（timer 刚 NewTimer，timer.C 一定空）。
-	first := true
+	// 回调异步派发（#167）：每个回调独立 goroutine（async.GoSafe，panic
+	// 收编对齐仓内并发口径），checkService/ticker 主循环不再同步等待回调——
+	// 修复前单回调在主循环内最多同步等 5s（3 回调各挂 5s = 本轮 15s），
+	// 期间所有服务的 Discover 与变更检测被压后、ticker tick 被丢弃，单个
+	// 挂死消费者把全部服务的实例感知延迟拖到分钟级。异步后主循环只做
+	// 发现与派发决策；慢/挂死回调的影响被 inflight 计数（#133）收敛为
+	// 「该服务跳过派发且 cache 不动」，排空后下一轮重 diff 补发。
+	//
+	// 派发决策与 inflight 计数仍在调用方 goroutine 内同步完成（上面的
+	// LoadOrStore + 下面的 Add），派发仅执行体异步——「同服务去重」的
+	// 判定窗口保持原子。
 	for _, cb := range callbacks {
-		done := make(chan struct{})
 		callback := cb
+		// 回调间隔离：并发执行下各回调拿各自的深拷贝。共享同一 evt 时
+		// 一个回调改 Instances（含 Metadata map）会与其它回调竞争——
+		// 串行派发时代仅靠「回调别改事件」的自觉，并发后必须显式隔离。
+		cbEvt := evt
+		cbEvt.Instances = deepCopyInstances(evt.Instances)
 		pendingCount.Add(1)
 		async.GoSafe(func() {
-			defer func() {
-				pendingCount.Add(-1)
-				close(done)
-			}()
-			callback(evt)
+			defer pendingCount.Add(-1)
+			callback(cbEvt)
 		})
-		if !first {
-			// Stop + drain 模式：上一次循环可能因为 timeout 已 fire，
-			// 残留 tick 在 channel 上。必须先 Stop 再消费，否则下一次
-			// Reset 不会清掉这个 stale tick。
-			if !timeoutTimer.Stop() {
-				select {
-				case <-timeoutTimer.C:
-				default:
-				}
-			}
-		}
-		first = false
-		timeoutTimer.Reset(5 * time.Second)
-		select {
-		case <-done:
-		case <-timeoutTimer.C:
-			healthLog.Warn("callback timeout", "service", serviceName)
-		}
 	}
-	timeoutTimer.Stop()
 }
 
 func instancesChanged(a, b []ereg.Instance) bool {

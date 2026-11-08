@@ -139,10 +139,12 @@ func (f *fakeApp) RequestShutdown() {
 	f.requestedOnce.Do(func() { close(f.requestedCh) })
 }
 
-// TestRunServer_ToleratesEngineNotRunning 钉住 hertz "engine is not running"
-// 错误文案，并验证关闭回调在 engine 未运行（server 从未启动，或已被 h.Run()
-// 内置信号路径优雅关闭——信号关机时 bootstrap 与 hertz 双路并发 Shutdown，
-// 后到者得到该错误）时按成功处理，不向 lifecycle.Manager 上报假错误。
+// TestRunServer_ToleratesEngineNotRunning 验证关闭回调在 engine 未运行
+// （server 从未启动，或已被 h.Run() 内置信号路径优雅关闭——信号关机时
+// bootstrap 与 hertz 双路并发 Shutdown，后到者得到 hertz 私有的
+// errStatusNotRunning 错误）时按成功处理，不向 lifecycle.Manager 上报假错误。
+// #166：容忍判定按 engine 状态（IsRunning）而非错误文本——文本是 hertz
+// 私有 sentinel 的措辞，无兼容承诺，上游改文案即每次信号关机假报错。
 func TestRunServer_ToleratesEngineNotRunning(t *testing.T) {
 	fa := newFakeApp()
 
@@ -157,10 +159,41 @@ func TestRunServer_ToleratesEngineNotRunning(t *testing.T) {
 	if err := closer(context.Background()); err != nil {
 		t.Fatalf("close resource should tolerate engine-not-running, got: %v", err)
 	}
+}
 
-	// 钉住文案：hertz 升级若改动错误文本，上方容忍逻辑会失效，此处显式失败提示。
-	if err := h.Shutdown(context.Background()); err == nil || err.Error() != errEngineNotRunning {
-		t.Fatalf("expected %q from Shutdown on non-running engine, got: %v", errEngineNotRunning, err)
+// TestShutdownErrTolerable_StateNotText 是 #166 的核心回归：容忍判定按
+// engine 状态而非 "engine is not running" 文案。
+//   - 非 running：任何错误（含措辞随机的错误）都容忍——双路关闭竞争；
+//   - running：任何错误都不容忍——排空超时等真失败必须上抛。
+//
+// 修复前按文本匹配：hertz 改措辞 ⇒ 非 running 的良性错误被当成真失败。
+func TestShutdownErrTolerable_StateNotText(t *testing.T) {
+	// 非 running（从未启动）：错误容忍。
+	idle := server.New(server.WithHostPorts(":0"))
+	if idle.IsRunning() {
+		t.Fatal("idle engine must not be running")
+	}
+	if !shutdownErrTolerable(idle, errors.New("engine has stopped dancing")) {
+		t.Error("non-running engine: benign race error must be tolerated regardless of text")
+	}
+
+	// running（真启动监听）：错误不容忍。
+	live := server.New(server.WithHostPorts(":0"))
+	async.GoSafe(func() { _ = live.Run() })
+	deadline := time.Now().Add(5 * time.Second)
+	for !live.IsRunning() {
+		if time.Now().After(deadline) {
+			t.Fatal("live engine never reached running state")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = live.Shutdown(ctx)
+	}()
+	if shutdownErrTolerable(live, errors.New("shutdown deadline exceeded")) {
+		t.Error("running engine: real shutdown failure must propagate")
 	}
 }
 

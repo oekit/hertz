@@ -232,7 +232,7 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 }
 
 // TestInstanceWatcher_SkipRoundDoesNotConsumeChange 是 #133 的回归测试：
-// 回调派发被跳过的轮次（上一轮回调仍在 5s 超时窗口内挂起）里发生的实例变更
+// 回调派发被跳过的轮次（上一轮回调仍在异步执行、未排空）里发生的实例变更
 // **不得被 cache 消费掉**。
 //
 // 旧实现先 `h.cache[svc] = copied` 再判 pending-skip：挂死/慢回调期间注册中心
@@ -240,7 +240,7 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 // 为 false——变更永久丢失，订阅方停留在旧实例集且无重试/补发。
 //
 // 复现路径（对齐 issue 实测：interval=200ms、回调睡 6s、t=600ms 注入第二实例）：
-//  1. 首轮派发 Added（1 实例），回调挂在 release 上（模拟 >5s 慢回调）；
+//  1. 首轮派发 Added（1 实例），回调挂在 release 上（模拟慢/挂死回调）；
 //  2. 注册中心新增第二实例，第二轮 checkService 因 inflight>0 跳过派发——
 //     此刻 cache 必须仍是 1 实例（变更未被消费）；
 //  3. 放行首轮回调、排空后第三轮重 diff：变更被重新发现并派发（Changed，2 实例），
@@ -256,7 +256,7 @@ func TestInstanceWatcher_SkipRoundDoesNotConsumeChange(t *testing.T) {
 		WithWatchServices("svc-a"),
 		WithWatchCallback(func(evt InstanceEvent) {
 			if len(evt.Instances) == 1 {
-				// 首轮回调挂起，制造「上一轮派发仍在执行」（>5s 超时窗口）
+				// 首轮回调挂起，制造「上一轮派发仍在异步执行」
 				<-release
 			}
 			events <- evt
@@ -266,7 +266,8 @@ func TestInstanceWatcher_SkipRoundDoesNotConsumeChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 第一轮（异步：派发会阻塞等回调完成，最长 5s 超时窗）。
+	// 第一轮：派发决策同步完成，回调在独立 goroutine 异步执行（#167），
+	// checkService 立即返回（外层 GoSafe 包装保留，证明调用方不再被拖住）。
 	firstDone := make(chan struct{})
 	async.GoSafe(func() {
 		h.checkService(ctx, "svc-a")
@@ -326,9 +327,10 @@ func TestInstanceWatcher_SkipRoundDoesNotConsumeChange(t *testing.T) {
 	}
 }
 
-// evt.Instances 是缓存专属深拷贝（review L8）：回调中修改事件实例（含
-// Metadata map）不得污染 h.cache，也不得影响下一次轮询的 prev diff 基线。
-// 若事件别名缓存，第一次回调的修改会让第二次轮询误报 instancesChanged。
+// evt.Instances 是缓存专属深拷贝（review L8），#167 后进一步是回调专属
+// 深拷贝：回调中修改事件实例（含 Metadata map）不得污染 h.cache，也不得
+// 影响下一次轮询的 prev diff 基线。若事件别名缓存，第一次回调的修改会让
+// 第二次轮询误报 instancesChanged。
 func TestInstanceWatcher_CallbackMutationDoesNotCorruptCache(t *testing.T) {
 	disc := &registrymocks.Discoverer{InstancesMap: map[string][]ereg.Instance{
 		"svc-a": {{Service: "svc-a", IP: "10.0.0.1", Port: 8080, Metadata: map[string]string{"version": "v1"}}},
@@ -349,15 +351,13 @@ func TestInstanceWatcher_CallbackMutationDoesNotCorruptCache(t *testing.T) {
 		}),
 	)
 
-	// 第一次轮询：触发事件，回调修改其收到的实例列表
+	// 第一次轮询：触发事件（回调异步执行，#167，等回调跑完再断言）
 	h.checkService(context.Background(), "svc-a")
-
-	mu.Lock()
-	gotCount := eventCount
-	mu.Unlock()
-	if gotCount != 1 {
-		t.Fatalf("expected 1 callback event after first poll, got %d", gotCount)
-	}
+	waitFor(t, 2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return eventCount == 1
+	})
 
 	// 缓存必须保持原值
 	cached := h.GetHealthyInstances("svc-a")
@@ -376,8 +376,9 @@ func TestInstanceWatcher_CallbackMutationDoesNotCorruptCache(t *testing.T) {
 
 	// 第二次轮询：实例未变化，不得因回调的修改误报第二个事件
 	h.checkService(context.Background(), "svc-a")
+	time.Sleep(50 * time.Millisecond)
 	mu.Lock()
-	gotCount = eventCount
+	gotCount := eventCount
 	mu.Unlock()
 	if gotCount != 1 {
 		t.Errorf("expected no extra event after second poll, got %d total", gotCount)

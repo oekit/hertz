@@ -139,9 +139,12 @@ type Handler[T any, ID comparable, CreateReq, UpdateReq any] struct {
 	// idParser 是路径参数 → ID 的解析函数（WithIDParser 注入）；
 	// nil 时用缺省解析（见 defaultParseID）。
 	idParser func(string) (ID, error)
-	// sortable 是排序白名单（小写列名）；nil 表示按实体类型 T 的字段反射生成
-	// （缺省口径，见 [WithSortableColumns] / [WithSortValidation]）。
-	sortable map[string]struct{}
+	// sortable 是排序白名单：键为小写别名，值为出 SQL 用的**规范化列名**。
+	// nil 表示按实体类型 T 的字段反射生成（缺省口径，见 [WithSortableColumns] /
+	// [WithSortValidation]）。#165：别名（json 名等）与真列名（gorm column tag
+	// 或蛇形转换）在此解耦——校验查别名，出 SQL 恒用规范化名，用户原文不进
+	// ORDER BY。
+	sortable map[string]string
 	// sortValidation 为 true 时排序列必须命中白名单；false 时只做标识符格式
 	// 校验（全放开，v0.8.14 缺省口径，见 [WithSortValidation]）。
 	sortValidation bool
@@ -197,19 +200,23 @@ func WithIDParser[T any, ID comparable, CreateReq, UpdateReq any](fn func(string
 
 // WithSortableColumns 设置 List 接口排序参数的白名单列名（列名小写匹配）。
 //
-// v0.9.0 起**未设置时白名单按实体类型 T 的字段反射生成**（字段名/json tag/
-// gorm column tag 的小写形式）——白名单外的列返回 400 "invalid sort parameter"
-// （不再让不存在的列进 ORDER BY 触发 DB 报错 ⇒ 5xx）。
+// v0.9.0 起**未设置时白名单按实体类型 T 的字段反射生成**——候选列名与 DB
+// 真实列名对齐（gorm `column:` tag 或 [gorm NamingStrategy] 蛇形转换，#165），
+// json tag 名作为别名放行但出 SQL 时一律改用规范化列名——白名单外的列返回
+// 400 "invalid sort parameter"（不再让不存在的列进 ORDER BY 触发 DB 报错 ⇒ 5xx）。
 //
-// 显式设置时以本白名单为准（不再叠加反射结果）。显式空调用
+// 显式设置时以本白名单为准（不再叠加反射结果），白名单值按调用方书写形式
+// 原样进 ORDER BY（显式白名单即调用方声明的真实列名）。显式空调用
 // （WithSortableColumns()）= 空白名单 = **全部拒绝**（与「未设置」语义相反，
 // 两者不再混同）。需要 v0.8.14 的「任意标识符列均可排序」用
 // [WithSortValidation](false)。
+//
+// [gorm NamingStrategy]: https://github.com/go-gorm/gorm/blob/master/schema/naming.go
 func WithSortableColumns[T any, ID comparable, CreateReq, UpdateReq any](cols ...string) HandlerOption[T, ID, CreateReq, UpdateReq] {
 	return func(h *Handler[T, ID, CreateReq, UpdateReq]) {
-		h.sortable = make(map[string]struct{}, len(cols))
+		h.sortable = make(map[string]string, len(cols))
 		for _, col := range cols {
-			h.sortable[strings.ToLower(col)] = struct{}{}
+			h.sortable[strings.ToLower(col)] = col
 		}
 	}
 }
@@ -399,21 +406,30 @@ func NewHandler[T any, ID comparable, CreateReq, UpdateReq any](svc crud.Service
 	return h
 }
 
-// entityColumns 按实体类型 T 的字段反射生成排序列白名单（小写列名）。
+// entityColumns 按实体类型 T 的字段反射生成排序列白名单（#165）。
 //
-// 候选列名 = 字段名（小写）+ json tag 名（小写）+ gorm tag 的 column 名（小写），
-// 匹配口径与 [WithSortableColumns] 一致（列名小写匹配，不造第二套口径）。
+// 返回「别名 → 规范化列名」映射：规范化列名与 gorm 的 DB 真实列名对齐
+// （gorm `column:` tag 优先；无 tag 字段套 gorm NamingStrategy 的蛇形转换，
+// 见 [snakeColumn]）——修复前白名单收的是 Go 字段名小写（如 DisplayName →
+// "displayname"），与 NamingStrategy 产出的真列名 "display_name" 脱节，
+// 按别名校验通过后 "displayname" 原文进 ORDER BY ⇒ 列不存在 ⇒ DB 报错 5xx。
+// 修复后别名只决定「能不能排」，出 SQL 恒用规范化列名。
+//
+// 别名集合 = 规范化列名本身 + json tag 名（小写）。Go 字段名小写**不再是**
+// 别名（与真列名脱节的正是它；无 tag 字段的字段名小写 ≠ 蛇形真列名时旧行为
+// 本就产生 5xx，有此需要的用 gorm column tag 或 json tag 显式声明）。
 // 嵌入结构体（匿名字段）的字段递归收集；time.Time 除外（其内部字段不是列）。
 //
 // 实体不是结构体 / 无可用字段 ⇒ 空集（白名单外的列一律 400，fail-closed）。
-func entityColumns[T any]() map[string]struct{} {
-	cols := make(map[string]struct{})
+func entityColumns[T any]() map[string]string {
+	cols := make(map[string]string)
 	collectEntityColumns(reflect.TypeOf((*T)(nil)).Elem(), cols, map[reflect.Type]struct{}{})
 	return cols
 }
 
-// collectEntityColumns 递归收集结构体字段的列名候选（含嵌入结构体）。
-func collectEntityColumns(t reflect.Type, cols map[string]struct{}, seen map[reflect.Type]struct{}) {
+// collectEntityColumns 递归收集结构体字段的「别名 → 规范化列名」
+// （含嵌入结构体）。
+func collectEntityColumns(t reflect.Type, cols map[string]string, seen map[reflect.Type]struct{}) {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -439,28 +455,98 @@ func collectEntityColumns(t reflect.Type, cols map[string]struct{}, seen map[ref
 				collectEntityColumns(ft, cols, seen)
 			}
 		}
-		addColumn(cols, f.Name)
+		// 规范化列名：gorm `column:` tag 优先；无 tag 套 NamingStrategy 蛇形
+		// 转换（与 gorm 建表时的真列名对齐，#165）。
+		col := snakeColumn(f.Name)
+		if tag, ok := f.Tag.Lookup("gorm"); ok {
+			if c := gormColumnTag(tag); c != "" {
+				col = c
+			}
+		}
+		addColumn(cols, col, col)
 		if tag, ok := f.Tag.Lookup("json"); ok {
 			name := strings.Split(tag, ",")[0]
 			if name != "" && name != "-" {
-				addColumn(cols, name)
-			}
-		}
-		if tag, ok := f.Tag.Lookup("gorm"); ok {
-			if col := gormColumnTag(tag); col != "" {
-				addColumn(cols, col)
+				// json 名是别名：放行校验，出 SQL 用规范化列名。
+				addColumn(cols, name, col)
 			}
 		}
 	}
 }
 
-// addColumn 把候选列名按小写口径加入白名单。
-func addColumn(cols map[string]struct{}, name string) {
-	name = strings.ToLower(name)
-	if name == "" {
+// addColumn 把「别名 → 规范化列名」按小写口径加入白名单。
+// 别名为空或规范化列名为空时不收（fail-closed，不产出空列名的 ORDER BY）。
+func addColumn(cols map[string]string, alias, col string) {
+	alias = strings.ToLower(alias)
+	if alias == "" || col == "" {
 		return
 	}
-	cols[name] = struct{}{}
+	cols[alias] = col
+}
+
+// commonInitialisms 是 gorm schema.NamingStrategy 的缩写词表（逐字对齐，
+// 顺序也一致——strings.NewReplacer 在同一位置命中多个 pattern 时按参数顺序
+// 取第一个）。
+var commonInitialisms = []string{"API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "LHS", "QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SSH", "TLS", "TTL", "UID", "UI", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XSRF", "XSS"}
+
+// initialismsReplacer 把缩写词改写成「首字母大写 + 其余小写」的驼峰形态
+// （gorm 用 golang.org/x/text 的 cases.Title，本仓零依赖口径用等价的手工
+// 首字母大写——缩写词表全为 ASCII 大写，两者逐词等价）。
+var initialismsReplacer = func() *strings.Replacer {
+	pairs := make([]string, 0, len(commonInitialisms)*2)
+	for _, in := range commonInitialisms {
+		pairs = append(pairs, in, strings.ToUpper(in[:1])+strings.ToLower(in[1:]))
+	}
+	return strings.NewReplacer(pairs...)
+}()
+
+// snakeColumn 把 Go 字段名转成 gorm NamingStrategy 的蛇形列名（#165）。
+//
+// 算法逐字对齐 gorm schema.NamingStrategy.toDBName（v1.31.2，已用真实
+// NamingStrategy 对缩写词表全量回归：ID→id、UserID→user_id、DisplayName→
+// display_name、HTTPServer→http_server、OAuth2Token→o_auth2_token 等，
+// 见 snake_column_test.go）——白名单产出的列名必须与 gorm 建表列名一致，
+// 否则「校验通过的列」依然是 DB 里不存在的列（本修复要消灭的正是这个）。
+func snakeColumn(name string) string {
+	if name == "" {
+		return ""
+	}
+	value := initialismsReplacer.Replace(name)
+
+	var buf strings.Builder
+	var lastCase, nextCase, nextNumber bool // upper case == true
+	curCase := value[0] >= 'A' && value[0] <= 'Z'
+
+	for i, v := range value[:len(value)-1] {
+		nextCase = value[i+1] >= 'A' && value[i+1] <= 'Z'
+		nextNumber = value[i+1] >= '0' && value[i+1] <= '9'
+
+		if curCase {
+			if lastCase && (nextCase || nextNumber) {
+				buf.WriteRune(v + 32)
+			} else {
+				if i > 0 && value[i-1] != '_' && value[i+1] != '_' {
+					buf.WriteByte('_')
+				}
+				buf.WriteRune(v + 32)
+			}
+		} else {
+			buf.WriteRune(v)
+		}
+
+		lastCase = curCase
+		curCase = nextCase
+	}
+
+	if curCase {
+		if !lastCase && len(value) > 1 {
+			buf.WriteByte('_')
+		}
+		buf.WriteByte(value[len(value)-1] + 32)
+	} else {
+		buf.WriteByte(value[len(value)-1])
+	}
+	return buf.String()
 }
 
 // gormColumnTag 从 gorm tag 中取 column 名（无则空串）。
@@ -650,9 +736,9 @@ func (h *Handler[T, ID, C, U]) normalizePageSize(pageSize int) int {
 	return pageSize
 }
 
-// sortAllowlist 返回当前生效的排序列白名单；nil 表示不做白名单校验（全放开，
-// 仅标识符格式校验）。见 [WithSortValidation]。
-func (h *Handler[T, ID, C, U]) sortAllowlist() map[string]struct{} {
+// sortAllowlist 返回当前生效的排序列白名单（别名 → 规范化列名）；nil 表示
+// 不做白名单校验（全放开，仅标识符格式校验）。见 [WithSortValidation]。
+func (h *Handler[T, ID, C, U]) sortAllowlist() map[string]string {
 	if !h.sortValidation {
 		return nil
 	}
@@ -867,9 +953,12 @@ func defaultParseID[ID comparable](s string) (ID, error) {
 }
 
 // parseSortParam 解析并校验单个排序片段 "<column>[ ASC|DESC]"。
-// 列名必须匹配 sortColumnRe；提供白名单时列名（不区分大小写）必须在列。
-// 返回值由白名单内列名与规范化方向重组而成，而非用户原文拼接。
-func parseSortParam(seg string, allowlist map[string]struct{}) (string, error) {
+// 列名必须匹配 sortColumnRe；提供白名单时列名（不区分大小写）必须命中
+// 别名，且返回值用白名单的**规范化列名**（#165）而非用户原文——别名
+// （如 json 名 "displayName"）与真列名（"display_name"）就此解耦，出
+// SQL 的恒是 DB 里存在的列。白名单为 nil（WithSortValidation(false)）时
+// 保留 v0.8.14 口径：用户原文透传（只做标识符正则校验）。
+func parseSortParam(seg string, allowlist map[string]string) (string, error) {
 	fields := strings.Fields(seg)
 	if len(fields) == 0 || len(fields) > 2 {
 		return "", errors.NewBadRequestError("invalid sort segment: " + seg)
@@ -879,9 +968,11 @@ func parseSortParam(seg string, allowlist map[string]struct{}) (string, error) {
 		return "", errors.NewBadRequestError("invalid sort column: " + col)
 	}
 	if allowlist != nil {
-		if _, ok := allowlist[strings.ToLower(col)]; !ok {
+		canon, ok := allowlist[strings.ToLower(col)]
+		if !ok {
 			return "", errors.NewBadRequestError("column not sortable: " + col)
 		}
+		col = canon
 	}
 	if len(fields) == 2 {
 		switch strings.ToUpper(fields[1]) {
