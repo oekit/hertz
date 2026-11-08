@@ -3,6 +3,7 @@ package hertz
 import (
 	"context"
 	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -208,5 +209,66 @@ func TestRunServer_ReadyProbeTimeoutStillShutsDown(t *testing.T) {
 	}
 	if _, ok := cap.find(slog.LevelError, "ready probe failed"); !ok {
 		t.Fatal("probe timeout must still log ERROR ready probe failed")
+	}
+}
+
+// TestCallOnReady_PanicBecomesError #152 单元面：callOnReady 把 panic 转为
+// 可判别 error（探活失败链的入口），正常回调零影响。
+func TestCallOnReady_PanicBecomesError(t *testing.T) {
+	err := callOnReady("svc-x", func(context.Context) { panic("registration backend exploded") },
+		context.Background())
+	if err == nil || !strings.Contains(err.Error(), "onReady panicked") ||
+		!strings.Contains(err.Error(), "registration backend exploded") {
+		t.Fatalf("callOnReady err = %v, want panic converted to error", err)
+	}
+	if err := callOnReady("svc-x", func(context.Context) {}, context.Background()); err != nil {
+		t.Fatalf("normal onReady must not error: %v", err)
+	}
+}
+
+// TestRunServer_OnReadyPanicShutsDown #152 回归（issue 探针原样）：探活通过后
+// onReady panic 不得被 async.GoSafe 静默吞掉——修复前 panic 沿 probeAndReady
+// 展开，外层闭包的「探活失败 ⇒ RequestShutdown」处置整段被跳过 ⇒ server 以
+// 「探活已过、回调丢失、永不注册」的半启动形态继续 serve。修复后 panic 在
+// probeAndReady 内转为 error，走探活失败语义：ERROR + RequestShutdown。
+func TestRunServer_OnReadyPanicShutsDown(t *testing.T) {
+	cap := installCapturingLogger(t)
+
+	// 取一个空闲端口后立即释放，交由 hertz server 自己绑定（探活能真实通过）。
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	h := server.New(server.WithHostPorts(addr))
+	app := newFakeLifecycleApp()
+	defer func() { _ = h.Shutdown(context.Background()) }()
+
+	var readyCalled atomic.Int64
+	RunServer(app, "test-svc", h,
+		WithOnReady(func(ctx context.Context) {
+			readyCalled.Add(1)
+			panic("registration backend exploded")
+		}),
+		WithReadyProbeTimeout(5*time.Second))
+
+	// 等 RequestShutdown（修复前永不发生——半启动 server 挂着不关）。
+	deadline := time.After(5 * time.Second)
+	for app.shutdowns.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("panicking onReady must request shutdown (got %d), server would keep serving unregistered",
+				app.shutdowns.Load())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	if got := readyCalled.Load(); got != 1 {
+		t.Fatalf("onReady called %d times, want 1 (probe passed, callback entered)", got)
+	}
+	if _, ok := cap.find(slog.LevelError, "ready probe failed"); !ok {
+		t.Fatal("onReady panic must take the probe-failure path (ERROR + shutdown)")
 	}
 }
