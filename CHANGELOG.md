@@ -1,3 +1,9 @@
+## [v0.10.6] — 2026-11-08
+
+- fix(transportx): requestHeader/replyHeader 的 Values 键匹配改大小写不敏感（EqualFold），与 Get 同一口径（#163）——hertz 存取键均规范化为 MIME canonical 形态（NormalizeHeaderKey，如 Set("X-Trace-ID",…) 落盘为 "X-Trace-Id"），Get 大小写不敏感命中而 Values 此前原文比较：调用方传 "x-trace-id" 这类变体时 Get 命中、Values 返回 nil，同一适配器两套键口径（core/transport 契约注释明说「各框架适配层负责大小写规范化差异」，本适配器此前没接住）。同修 replyHeader.Values；Keys()/Get 的 godoc 补挂 canonical 形态契约（Keys 返回规范化键，消费方应大小写不敏感回读）。表驱动测试钉住 4 种大小写变体 × Get/Values 一致性 + replyHeader 同口径 + Keys canonical 形态
+
+关联问题单：hertz#163。
+
 ## [v0.10.5] — 2026-11-08
 
 - fix(bootstrap): 探活路径 onReady panic 改按启动失败处置（#152）——修复前两处 onReady 调用裸奔在 async.GoSafe 里：panic 沿 probeAndReady 展开，外层「探活失败 ⇒ Error + RequestShutdown」处置整段被跳过，GoSafe recover 后仅记日志 ⇒ server 以「探活已过、回调丢失、永不注册」的半启动形态继续 serve（进程假活，典型形态：延迟 Nacos 注册永不发生）；修复后 panic 在 probeAndReady 内转为 error（callOnReady），走既有探活失败链关停 server，与 probeDisabled 同步路径的「响亮启动失败」同一 panic 政策
