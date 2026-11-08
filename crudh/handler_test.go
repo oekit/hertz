@@ -8,8 +8,10 @@ import (
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
+	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/cloudwego/hertz/pkg/route/param"
@@ -583,4 +585,111 @@ func TestHandler_StringPK_EndToEnd(t *testing.T) {
 	h.Get(context.Background(), c)
 	resp = parseResp(t, c)
 	assert.DeepEqual(t, 404, resp.Code)
+}
+
+// --- 命名 string 主键缺省解析（#178 回归钉）---
+
+// orderID 是命名 string 主键（Go 惯用法 type MyID string）。旧实现的
+// any(s).(ID) 硬断言装箱的底层 string，断言到命名类型必 panic——端点
+// 「注册成功但每个 GET 都是 500」，直通与 400 两头承诺都失守。
+type orderID string
+
+type orderDoc struct {
+	ID   orderID `json:"id"`
+	Name string  `json:"name"`
+}
+
+type mockOrderService struct {
+	mu   sync.Mutex
+	docs map[orderID]*orderDoc
+}
+
+func (m *mockOrderService) Create(ctx context.Context, req *createDocReq) (*orderDoc, error) {
+	return nil, bizerrors.NewBadRequestError("not exercised")
+}
+
+func (m *mockOrderService) Get(ctx context.Context, id orderID) (*orderDoc, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.docs[id]
+	if !ok {
+		// 与 crud.BaseService.Get 的包装行为一致（mw.Fail 按 BizError 渲染 404）
+		return nil, bizerrors.NewBizError(404, "not found")
+	}
+	return d, nil
+}
+
+func (m *mockOrderService) GetOne(ctx context.Context, q *crud.Query) (*orderDoc, error) {
+	return nil, crud.ErrNotFound
+}
+
+func (m *mockOrderService) List(ctx context.Context, q *crud.Query) (*crud.PageResponse[orderDoc], error) {
+	return &crud.PageResponse[orderDoc]{}, nil
+}
+
+func (m *mockOrderService) Update(ctx context.Context, id orderID, req *createDocReq) (*orderDoc, error) {
+	return nil, crud.ErrNotFound
+}
+
+func (m *mockOrderService) Delete(ctx context.Context, id orderID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.docs[id]; !ok {
+		return crud.ErrNotFound
+	}
+	delete(m.docs, id)
+	return nil
+}
+
+// TestParseID_NamedStringPK 缺省解析必须支持命名 string 主键：反射构造
+// 命名类型值，而非 any(s).(ID) 硬断言（#178）。裸 string 行为不变。
+func TestParseID_NamedStringPK(t *testing.T) {
+	id, err := defaultParseID[orderID]("abc-1")
+	assert.Nil(t, err)
+	assert.DeepEqual(t, orderID("abc-1"), id)
+
+	bare, err := defaultParseID[string]("abc-1")
+	assert.Nil(t, err)
+	assert.DeepEqual(t, "abc-1", bare)
+}
+
+// TestHandler_NamedStringPK_RouteGET 命名 string 主键、**未注入**
+// WithIDParser 的 Handler 走真实路由 GET：旧行为 defaultParseID panic →
+// recovery 转 500（每个 GET 都是 500）；修复后 200 且 ID 值正确。
+func TestHandler_NamedStringPK_RouteGET(t *testing.T) {
+	const wantID = "abc-1"
+	svc := &mockOrderService{docs: map[orderID]*orderDoc{wantID: {ID: wantID, Name: "order1"}}}
+	h := NewHandler[orderDoc, orderID, createDocReq, createDocReq](svc)
+
+	hs := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.RegisterRoutes(hs.Group("/api"), "/orders")
+
+	w := ut.PerformRequest(hs.Engine, consts.MethodGet, "/api/orders/"+wantID, nil)
+	if w.Code != consts.StatusOK {
+		t.Fatalf("status = %d, want 200 (body=%s)", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Code int      `json:"code"`
+		Data orderDoc `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response body %q: %v", w.Body.String(), err)
+	}
+	assert.DeepEqual(t, 0, resp.Code)
+	assert.DeepEqual(t, wantID, string(resp.Data.ID))
+	assert.DeepEqual(t, "order1", resp.Data.Name)
+
+	// 不存在的 ID → HTTP 404 + 业务码 404（fail-closed 语义对命名 string 同样成立）
+	w = ut.PerformRequest(hs.Engine, consts.MethodGet, "/api/orders/nope", nil)
+	if w.Code != consts.StatusNotFound {
+		t.Fatalf("missing id: status = %d, want 404", w.Code)
+	}
+	var miss apiResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &miss); err != nil {
+		t.Fatalf("unmarshal miss response: %v", err)
+	}
+	assert.DeepEqual(t, 404, miss.Code)
 }

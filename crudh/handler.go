@@ -192,8 +192,9 @@ type HandlerOption[T any, ID comparable, CreateReq, UpdateReq any] func(*Handler
 // WithIDParser 注入路径参数 → ID 的解析函数。
 //
 // 缺省解析：int 系主键按 strconv.ParseInt（宽度随 ID 类型，与 v0.6 之前
-// int64 行为一致）、string 主键直通；其余 comparable 类型必须显式注入，
-// 缺省解析失败按 400 拒绝（fail-closed，绝不猜测）。
+// int64 行为一致）、string 主键直通（含命名 string 类型，#178）；其余
+// comparable 类型必须显式注入，缺省解析失败按 400 拒绝（fail-closed，
+// 绝不猜测）。
 // 文本主键项目传恒等解析即可：`WithIDParser[Doc, string, C, U](func(s string) (string, error) { return s, nil })`。
 func WithIDParser[T any, ID comparable, CreateReq, UpdateReq any](fn func(string) (ID, error)) HandlerOption[T, ID, CreateReq, UpdateReq] {
 	return func(h *Handler[T, ID, CreateReq, UpdateReq]) { h.idParser = fn }
@@ -1015,8 +1016,9 @@ func (h *Handler[T, ID, C, U]) parseID(c *app.RequestContext) (ID, error) {
 }
 
 // defaultParseID 缺省路径参数解析：int 系主键 strconv.ParseInt（宽度随
-// ID 类型，int64 与 v0.6 之前行为一致）、string 主键直通；其余 comparable
-// 类型不支持缺省解析（须 WithIDParser 注入），一律按 400 拒绝。
+// ID 类型，int64 与 v0.6 之前行为一致）、string 主键直通（含命名 string
+// 类型，如 type OrderID string，#178）；其余 comparable 类型不支持缺省
+// 解析（须 WithIDParser 注入），一律按 400 拒绝。
 func defaultParseID[ID comparable](s string) (ID, error) {
 	var zero ID
 	t := reflect.TypeOf(zero)
@@ -1025,7 +1027,12 @@ func defaultParseID[ID comparable](s string) (ID, error) {
 	}
 	switch t.Kind() {
 	case reflect.String:
-		return any(s).(ID), nil
+		// 命名 string 类型不能 any(s).(ID) 硬断言：装箱的动态类型是底层
+		// string，断言到命名类型必 panic——端点「注册成功但每个 GET 都是
+		// 500」（#178）。与 int/uint 分支同构，反射构造命名类型值。
+		out := reflect.New(t).Elem()
+		out.SetString(s)
+		return out.Interface().(ID), nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		v, err := strconv.ParseInt(s, 10, t.Bits())
 		if err != nil {
