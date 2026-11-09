@@ -15,10 +15,10 @@ require (
 	github.com/oekit/metrics v0.2.0
 	github.com/oekit/middleware v0.14.1
 	github.com/oekit/nns v0.5.13
-	github.com/oekit/pkg v0.40.0
-	github.com/oekit/registry v0.5.10
-	github.com/oekit/registry/nacos v0.1.10
-	github.com/oekit/tracing v0.3.8
+	github.com/oekit/pkg v0.41.0
+	github.com/oekit/registry v0.5.11
+	github.com/oekit/registry/nacos v0.1.11
+	github.com/oekit/tracing v0.3.9
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -36,7 +36,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.11 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.12 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
