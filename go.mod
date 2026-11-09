@@ -6,18 +6,18 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/bootstrap v0.7.0
-	github.com/oekit/concurrency v0.31.0
-	github.com/oekit/core v0.13.5
-	github.com/oekit/gormx v0.11.7
-	github.com/oekit/kitx v0.5.0
-	github.com/oekit/logx v0.8.12
-	github.com/oekit/metrics v0.2.0
-	github.com/oekit/middleware v0.14.1
-	github.com/oekit/nns v0.5.13
-	github.com/oekit/pkg v0.41.0
-	github.com/oekit/registry v0.5.11
-	github.com/oekit/registry/nacos v0.1.11
+	github.com/oekit/bootstrap v0.7.1
+	github.com/oekit/concurrency v0.31.1
+	github.com/oekit/core v0.13.6
+	github.com/oekit/gormx v0.11.8
+	github.com/oekit/kitx v0.6.0
+	github.com/oekit/logx v0.9.0
+	github.com/oekit/metrics v0.2.1
+	github.com/oekit/middleware v0.15.0
+	github.com/oekit/nns v0.5.14
+	github.com/oekit/pkg v0.41.1
+	github.com/oekit/registry v0.5.12
+	github.com/oekit/registry/nacos v0.1.12
 	github.com/oekit/tracing v0.3.9
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
