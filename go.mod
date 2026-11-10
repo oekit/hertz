@@ -6,19 +6,19 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/bootstrap v0.7.5
-	github.com/oekit/concurrency v0.32.0
-	github.com/oekit/core v0.14.0
-	github.com/oekit/gormx v0.11.11
-	github.com/oekit/kitx v0.6.2
+	github.com/oekit/bootstrap v0.7.6
+	github.com/oekit/concurrency v0.33.0
+	github.com/oekit/core v0.14.1
+	github.com/oekit/gormx v0.11.13
+	github.com/oekit/kitx v0.7.0
 	github.com/oekit/logx v0.9.2
-	github.com/oekit/metrics v0.2.3
-	github.com/oekit/middleware v0.16.1
-	github.com/oekit/nns v0.5.17
-	github.com/oekit/pkg v0.42.0
-	github.com/oekit/registry v0.5.13
-	github.com/oekit/registry/nacos v0.1.12
-	github.com/oekit/tracing v0.3.10
+	github.com/oekit/metrics v0.2.4
+	github.com/oekit/middleware v0.16.2
+	github.com/oekit/nns v0.6.0
+	github.com/oekit/pkg v0.43.0
+	github.com/oekit/registry v0.5.14
+	github.com/oekit/registry/nacos v0.1.13
+	github.com/oekit/tracing v0.4.0
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -36,7 +36,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.13 // indirect
+	github.com/oekit/registry/nacosimpl v0.1.14 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )

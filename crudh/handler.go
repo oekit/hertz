@@ -907,6 +907,27 @@ func (h *Handler[T, ID, C, U]) List(ctx context.Context, c *app.RequestContext) 
 		return
 	}
 
+	// v0.8.14 逐字回显（WithPageNormalization(false) 契约）：信封回显**请求
+	// 原值**，不跟随下游入口归一。gormx v0.11.12（#155）起 crud.Query.Page 会
+	// 在入口把 (1,0) 归一成 (1,20)、超上限钳 500——信封若取 GetPage() 字段即
+	// 回显归一值，兼容档消费者的响应格式会漂。SQL 行为两侧一致（PageRequest
+	// 的 Limit()/Offset() 读时归一历来如此），此处只回填信封回显面：
+	// page/page_size 回显原值、pages 按原值口径（未分页/0 页宽 = 0）。
+	// 仅缺省绑定路径生效——自定义 QueryBinder / WithListParams(false) 的
+	// 语义归各自开关管辖。
+	if !h.pageNormalization && h.queryBinder == nil && !h.listParamsDisabled {
+		page, _ := strconv.Atoi(c.Query("page"))
+		pageSize, _ := strconv.Atoi(c.Query("page_size"))
+		if resp != nil {
+			resp.Page, resp.PageSize = page, pageSize
+			if pageSize > 0 {
+				resp.Pages = int((resp.Total + int64(pageSize) - 1) / int64(pageSize))
+			} else {
+				resp.Pages = 0
+			}
+		}
+	}
+
 	h.write(ctx, c, OpList, resp)
 }
 
