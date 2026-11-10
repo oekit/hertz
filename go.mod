@@ -10,10 +10,10 @@ require (
 	github.com/oekit/concurrency v0.33.0
 	github.com/oekit/core v0.14.1
 	github.com/oekit/gormx v0.11.13
-	github.com/oekit/kitx v0.7.0
+	github.com/oekit/kitx v0.8.0
 	github.com/oekit/logx v0.9.2
 	github.com/oekit/metrics v0.2.4
-	github.com/oekit/middleware v0.16.2
+	github.com/oekit/middleware v0.17.0
 	github.com/oekit/nns v0.6.0
 	github.com/oekit/pkg v0.43.0
 	github.com/oekit/registry v0.5.14
