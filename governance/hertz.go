@@ -46,13 +46,20 @@ type bucket struct {
 	last   time.Time
 }
 
+// bucketCapacity 返回策略的桶容量（core LimiterPolicy 口径）：Burst，0 时
+// 取 Rate。桶的初始令牌数（[newBucket]）与上限钳制（allow）必须同一来源——
+// 两套口径会让突发上限实际不生效（#234）。
+func bucketCapacity(pol governance.LimiterPolicy) int {
+	if pol.Burst > 0 {
+		return pol.Burst
+	}
+	return pol.Rate
+}
+
 func (b *bucket) allow(now time.Time) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	burst := b.policy.Burst
-	if burst <= 0 {
-		burst = b.policy.Rate
-	}
+	burst := bucketCapacity(b.policy)
 	elapsed := now.Sub(b.last).Seconds()
 	b.last = now
 	b.tokens += elapsed * float64(b.policy.Rate)
@@ -64,6 +71,16 @@ func (b *bucket) allow(now time.Time) bool {
 	}
 	b.tokens--
 	return true
+}
+
+// newBucket 构造新桶：初始令牌数 = 桶容量（#234）。此前写死 pol.Rate——
+// 容量口径在 allow 里按 Burst 钳制、存量口径却是 Rate，两套口径并存：
+// 运维按「平时 1 QPS、允许 100 突发」配 rate=1 burst=100，实际首个突发只
+// 放行 1 个，其余全 429，突发上限在新桶上不生效。初始存量改用与容量同一
+// 来源的 [bucketCapacity]（Burst，0 时取 Rate），与令牌桶模型的标准语义
+// （新桶满）一致。
+func newBucket(gen int64, pol governance.LimiterPolicy, now time.Time) *bucket {
+	return &bucket{gen: gen, policy: pol, tokens: float64(bucketCapacity(pol)), last: now}
 }
 
 // applySnapshot 把一份配置快照(带其发布代际 gen)合并进桶:只有**新于**
@@ -105,7 +122,14 @@ func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 			return
 		}
 		now := time.Now()
-		v, _ := buckets.LoadOrStore(key, &bucket{gen: gen, policy: pol, tokens: float64(pol.Rate), last: now})
+		// 双查模式（#223）：LoadOrStore 的 newBucket 参数无论命中与否都会求值，
+		// 命中路径上每请求白分配一个含锁的 bucket（纯热路径垃圾）。先 Load
+		// 命中直接用；miss 分支才构造并 LoadOrStore——并发冷启动下的双插由
+		// LoadOrStore 的原子性兜住，输者只是丢弃新桶，分配收敛到冷启动/新键。
+		v, ok := buckets.Load(key)
+		if !ok {
+			v, _ = buckets.LoadOrStore(key, newBucket(gen, pol, now))
+		}
 		b := v.(*bucket)
 		applySnapshot(b, pol, gen)
 		if !b.allow(now) {
@@ -116,18 +140,81 @@ func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 	}
 }
 
-// NewTimeoutMiddleware 返回动态超时中间件:按 "path" → "" 从 Store 取
-// 超时(毫秒),给下游 handler 的 ctx 注入 deadline(ctx 感知的依赖会
-// 提前中止)。到期由下游 ctx 传播体现,本中间件不主动掐断响应。
+// NewTimeoutMiddleware 返回动态超时中间件:按 "METHOD:path" → "path" →
+// path 前缀最长匹配(按「/」段边界) → "" 从 Store 取超时(毫秒),给下游
+// handler 的 ctx 注入 deadline(ctx 感知的依赖会提前中止)。到期由下游 ctx
+// 传播体现,本中间件不主动掐断响应。
+//
+// 键形态与限流侧([NewLimiterMiddleware] → LookupLimiterKey)一致(#233):
+// 此前复用面向 kitex 的 LookupTimeout(path, "")——第一档查的是
+// path+":"(永远不是 "METHOD:path"),共享模板文档化的 {"GET:/slow":50}
+// 在 hertz 侧静默失效;其「.」段前缀档是 service 名语义,套到路径上还会把
+// /api 误命中到 /api.v1/users。
 //
 // 路径取**路由模板**(见 [routePath])。
+//
+// ⚠️ #235:deadline 到期前**不得**取消 ctx——cancel 不在中间件返回时调用
+// (hertz 允许异步 handler 把工作交给后台 goroutine 后立即返回,中间件返回
+// 即 defer cancel() 会把超时值变成 0ms)。子 ctx 由 WithTimeout 的内部定时器
+// 在 deadline 到点自动取消,cancel 只用于提前释放,而我们恰恰不能提前。代价:
+// 定时器存活至 deadline(有界:QPS × 超时值;hertz 的请求 ctx 源自每连接
+// ctx、请求完成从不取消,没有可挂靠的「响应写完」钩子,提前释放与异步
+// 正确性不可兼得——同步 handler 的提前释放正是本缺陷)。
 func NewTimeoutMiddleware(store *governance.Store) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
-		if ms, ok := store.Load().LookupTimeout(routePath(c), ""); ok && ms > 0 {
-			tctx, cancel := context.WithTimeout(ctx, time.Duration(ms)*time.Millisecond)
-			defer cancel()
+		if ms, ok := lookupTimeoutKey(store.Load().TimeoutMs, string(c.Method()), routePath(c)); ok && ms > 0 {
+			d := time.Duration(ms) * time.Millisecond
+			tctx, cancel := context.WithTimeout(ctx, d)
+			// #235:不在中间件返回时取消。cancel 安排在 deadline 到点触发——
+			// 与 WithTimeout 内部定时器到点取消重复但幂等(cancel 可重入),
+			// 语义即「cancel 不早于 deadline」(见 godoc)。
+			time.AfterFunc(d, cancel)
 			ctx = tctx
 		}
 		c.Next(ctx)
 	}
+}
+
+// lookupTimeoutKey 按 hertz 键形态查超时:档序与 core LookupLimiterKey 的
+// 路径口径一致(#233)——"METHOD:path" → "path" → path 前缀最长匹配(按
+// 「/」段边界,每档先试 method 限定键再试裸 path) → ""。
+//
+// core 侧暂无 path 口径的 LookupTimeoutKey(issue #233 建议 1),本函数是
+// hertz 侧的同构本地实现,core 提供后可整体替换。不能拿 LookupTimeout(path, "")
+// 顶替:其第一档查 path+":"(永不命中 "METHOD:path"),第三档按「.」段边界
+// 匹配 service 名前缀,对 path 是误命中面。
+func lookupTimeoutKey(m map[string]int, method, path string) (int, bool) {
+	if len(m) == 0 {
+		return 0, false
+	}
+	if v, ok := m[method+":"+path]; ok {
+		return v, true
+	}
+	if v, ok := m[path]; ok {
+		return v, true
+	}
+	for _, p := range pathSegmentPrefixes(path) {
+		if v, ok := m[method+":"+p]; ok {
+			return v, true
+		}
+		if v, ok := m[p]; ok {
+			return v, true
+		}
+	}
+	v, ok := m[""]
+	return v, ok
+}
+
+// pathSegmentPrefixes 返回 path 的全部真段前缀(不含 path 自身与空串),
+// 从长到短:/order/123 → ["/order"]。与 core segmentPrefixes(path, "/") 同构:
+// 分隔符必须落在段尾(/orders 不为 /order 产生候选),起始 "/" 不算边界
+// (i 从 1 起,否则会产出空串)。
+func pathSegmentPrefixes(path string) []string {
+	var out []string
+	for i := 1; i < len(path); i++ {
+		if path[i] == '/' {
+			out = append(out, path[:i])
+		}
+	}
+	return out
 }

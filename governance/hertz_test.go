@@ -2,6 +2,7 @@ package govhertz
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 
+	"github.com/oekit/concurrency/async"
 	"github.com/oekit/core/governance"
 )
 
@@ -351,4 +353,298 @@ func TestLimiterMiddleware_PolicySwitchNoFreeRefill(t *testing.T) {
 	if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 200 {
 		t.Errorf("after natural refill = %d, want 200 (new policy governs refill)", w.Code)
 	}
+}
+
+// ==================== 超时键形态（#233） ====================
+
+// TestTimeoutMiddleware_MethodPathKey 回归 #233：按共享治理模板文档写的
+// "METHOD:path" 精确键必须在 hertz 侧生效。此前复用 kitex 口径的
+// LookupTimeout(path, "")——第一档查的是 path+":"，METHOD:path 键静默失效
+// （无 deadline，超时保护整体不生效且无任何日志）。
+func TestTimeoutMiddleware_MethodPathKey(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"timeout_ms":{"GET:/slow":50}}`))
+	store.Update(cfg)
+
+	var gotDeadline bool
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+	h.GET("/slow", func(ctx context.Context, c *app.RequestContext) {
+		_, gotDeadline = ctx.Deadline()
+		c.Next(ctx)
+	})
+	h.POST("/slow", func(ctx context.Context, c *app.RequestContext) {
+		if _, ok := ctx.Deadline(); ok {
+			t.Error("POST must not hit the GET:/slow timeout key")
+		}
+		c.Next(ctx)
+	})
+
+	ut.PerformRequest(h.Engine, "GET", "/slow", nil)
+	if !gotDeadline {
+		t.Error(`timeout_ms["GET:/slow"] must produce a deadline for GET /slow`)
+	}
+	ut.PerformRequest(h.Engine, "POST", "/slow", nil)
+}
+
+// TestTimeoutMiddleware_PathSegmentPrefixNoDotCrossHit 回归 #233 复现 B：
+// 前缀档必须按「/」段边界匹配，不得沿用 service 名的「.」段口径——只配
+// "/api" 不得命中 /api.v1/users（命中范围超出配置意图）。
+func TestTimeoutMiddleware_PathSegmentPrefixNoDotCrossHit(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"timeout_ms":{"/api":50}}`))
+	store.Update(cfg)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+	h.GET("/api.v1/users", func(ctx context.Context, c *app.RequestContext) {
+		if _, ok := ctx.Deadline(); ok {
+			t.Error(`"/api" must not match /api.v1/users ("."-segment prefix tier is service-name semantics, not path semantics)`)
+		}
+		c.Next(ctx)
+	})
+	ut.PerformRequest(h.Engine, "GET", "/api.v1/users", nil)
+}
+
+// TestTimeoutMiddleware_PathPrefixTier 钉住前缀档的正确语义：method 限定键
+// 与裸 path 键都按「/」段边界命中路由模板（/order/:id → 前缀 /order）。
+func TestTimeoutMiddleware_PathPrefixTier(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"timeout_ms":{"GET:/order":50}}`))
+	store.Update(cfg)
+
+	var gotDeadline bool
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+	h.GET("/order/:id", func(ctx context.Context, c *app.RequestContext) {
+		_, gotDeadline = ctx.Deadline()
+		c.Next(ctx)
+	})
+	ut.PerformRequest(h.Engine, "GET", "/order/1", nil)
+	if !gotDeadline {
+		t.Error(`timeout_ms["GET:/order"] must match /order/:id via "/"-segment prefix tier`)
+	}
+}
+
+// TestTimeoutMiddleware_GlobalKey 钉住全局 "" 键兜底。
+func TestTimeoutMiddleware_GlobalKey(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"timeout_ms":{"":50}}`))
+	store.Update(cfg)
+
+	var gotDeadline bool
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+	h.GET("/anything", func(ctx context.Context, c *app.RequestContext) {
+		_, gotDeadline = ctx.Deadline()
+		c.Next(ctx)
+	})
+	ut.PerformRequest(h.Engine, "GET", "/anything", nil)
+	if !gotDeadline {
+		t.Error(`timeout_ms[""] (global default) must produce a deadline`)
+	}
+}
+
+// TestTimeoutMiddleware_AsyncHandlerDeadline 回归 #235：异步 handler 把工作
+// 交给后台 goroutine 后立即返回，ctx 必须保持存活到 deadline 到期才取消——
+// 此前 defer cancel() 挂在中间件返回上，后台 goroutine 的超时值实际为 0ms。
+func TestTimeoutMiddleware_AsyncHandlerDeadline(t *testing.T) {
+	store := governance.NewStore(nil)
+	const timeoutMs = 120
+	cfg, _ := governance.Parse([]byte(`{"timeout_ms":{"/async":` + itoa(timeoutMs) + `}}`))
+	store.Update(cfg)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+
+	cancelled := make(chan time.Duration, 1)
+	h.GET("/async", func(ctx context.Context, c *app.RequestContext) {
+		start := time.Now()
+		async.GoSafe(func() {
+			<-ctx.Done()
+			cancelled <- time.Since(start)
+		})
+		// 立即返回：响应照常写出，后台 goroutine 继续持有 ctx（SSE/异步
+		// 推送的常见写法）
+	})
+	go func() { _ = ut.PerformRequest(h.Engine, "GET", "/async", nil) }()
+
+	select {
+	case elapsed := <-cancelled:
+		// 下界：不得在 deadline 一半之前取消（旧缺陷=0ms）；上界：3 倍超时
+		// 之外说明定时器没生效。窗口余量防 CI 慢调度。
+		if elapsed < 60*time.Millisecond {
+			t.Errorf("ctx cancelled after %v, want >=60ms (0ms means middleware-return cancel, the #235 bug)", elapsed)
+		}
+		if elapsed > 3*timeoutMs*time.Millisecond {
+			t.Errorf("ctx cancelled after %v, want ~%dms (deadline timer must still fire)", elapsed, timeoutMs)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("async goroutine never observed ctx cancellation within 2s")
+	}
+}
+
+// TestTimeoutMiddleware_NoConfigNoDeadline 钉住：无配置（含 timeout_ms 键
+// 不存在）时不注入 deadline，行为与既往一致。
+func TestTimeoutMiddleware_NoConfigNoDeadline(t *testing.T) {
+	store := governance.NewStore(nil)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewTimeoutMiddleware(store))
+	h.GET("/open", func(ctx context.Context, c *app.RequestContext) {
+		if _, ok := ctx.Deadline(); ok {
+			t.Error("empty store should not inject a deadline")
+		}
+		c.Next(ctx)
+	})
+	ut.PerformRequest(h.Engine, "GET", "/open", nil)
+}
+
+// TestLookupTimeoutKey_Matrix 表驱动钉住 lookupTimeoutKey 的档序：
+// "METHOD:path" → "path" → 「/」段前缀（每档先 method 限定再裸 path）→ ""。
+func TestLookupTimeoutKey_Matrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		cfg    map[string]int
+		method string
+		path   string
+		want   int
+		wantOK bool
+	}{
+		{
+			name:   "exact METHOD:path wins",
+			cfg:    map[string]int{"GET:/slow": 10, "/slow": 20, "": 30},
+			method: "GET", path: "/slow",
+			want: 10, wantOK: true,
+		},
+		{
+			name:   "bare path tier",
+			cfg:    map[string]int{"/slow": 20, "": 30},
+			method: "POST", path: "/slow",
+			want: 20, wantOK: true,
+		},
+		{
+			name:   "method-qualified prefix tier beats bare prefix",
+			cfg:    map[string]int{"GET:/order": 10, "/order": 20},
+			method: "GET", path: "/order/123",
+			want: 10, wantOK: true,
+		},
+		{
+			name:   "bare prefix tier",
+			cfg:    map[string]int{"/order": 20},
+			method: "POST", path: "/order/123",
+			want: 20, wantOK: true,
+		},
+		{
+			name:   "segment boundary: /orders is not a prefix of /order",
+			cfg:    map[string]int{"/order": 20},
+			method: "GET", path: "/orders",
+			want: 0, wantOK: false,
+		},
+		{
+			name:   "no dot-segment cross hit",
+			cfg:    map[string]int{"/api": 20},
+			method: "GET", path: "/api.v1/users",
+			want: 0, wantOK: false,
+		},
+		{
+			name:   "global fallback",
+			cfg:    map[string]int{"": 30},
+			method: "GET", path: "/whatever",
+			want: 30, wantOK: true,
+		},
+		{
+			name:   "nil map",
+			cfg:    nil,
+			method: "GET", path: "/slow",
+			want: 0, wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := lookupTimeoutKey(tt.cfg, tt.method, tt.path)
+			if ok != tt.wantOK || got != tt.want {
+				t.Errorf("lookupTimeoutKey(%v, %q, %q) = (%d, %v), want (%d, %v)",
+					tt.cfg, tt.method, tt.path, got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+// ==================== 桶初始存量（#234） ====================
+
+// TestNewBucket_InitialTokensMatrix 回归 #234：新桶初始令牌数 = 桶容量
+// （Burst，0 时取 Rate），与 allow 的容量钳制同一口径。
+func TestNewBucket_InitialTokensMatrix(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name       string
+		pol        governance.LimiterPolicy
+		wantTokens float64
+	}{
+		{name: "burst is capacity", pol: governance.LimiterPolicy{Rate: 1, Burst: 100}, wantTokens: 100},
+		{name: "zero burst falls back to rate", pol: governance.LimiterPolicy{Rate: 5, Burst: 0}, wantTokens: 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := newBucket(1, tt.pol, now)
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.tokens != tt.wantTokens {
+				t.Errorf("initial tokens = %v, want %v (capacity, not rate)", b.tokens, tt.wantTokens)
+			}
+		})
+	}
+}
+
+// TestLimiterMiddleware_BurstInitialTokens 回归 #234（行为级）：rate=1
+// burst=50 的新桶首个突发必须放行 50 个——此前初始存量=Rate，只放行 1 个，
+// 其余 429（限流比配置严格一个数量级）。
+func TestLimiterMiddleware_BurstInitialTokens(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"limiter":{"GET:/burst":{"rate":1,"burst":50}}}`))
+	store.Update(cfg)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewLimiterMiddleware(store))
+	h.GET("/burst", func(_ context.Context, c *app.RequestContext) {
+		c.String(200, "ok")
+	})
+
+	allowed := 0
+	for range 60 {
+		if ut.PerformRequest(h.Engine, "GET", "/burst", nil).Code == 200 {
+			allowed++
+		}
+	}
+	// 余量 1：补偿整轮循环里 rate=1/s 的自然回填（循环耗时 >1s 时 +1）
+	if allowed < 50 || allowed > 51 {
+		t.Errorf("allowed = %d, want 50 (burst capacity must be the initial tokens)", allowed)
+	}
+}
+
+// itoa 是测试内的小工具：timeout_ms 数值拼进配置 JSON 用。
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }
