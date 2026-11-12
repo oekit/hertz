@@ -30,7 +30,15 @@ func WithDefaultWeight(w int) RegistryOption {
 //
 // 返回的 Registry 可直接传给 Hertz Server 的 [server.WithRegistry] 选项。
 // Hertz 在 server.Spin 启动时自动调用 Register，退出时调用 Deregister。
+//
+// reg 为 nil 时 panic——此前无校验，nil 接口上的 r.reg.Register(...) 会拖到
+// engine.Spin 的注册路径（hertz 内部 goroutine）才 panic，症状是「启动期
+// 未知来源 panic」；本包与 nns 包两个 Registry 适配器对同一错误形态统一为
+// 构造期 fail-fast（#219，文案口径对齐 nns 包 NewRegistry）。
 func NewRegistry(reg ereg.Registrar, opts ...RegistryOption) hregistry.Registry {
+	if reg == nil {
+		panic("hertz: NewRegistry requires non-nil registrar")
+	}
 	r := &hertzRegistry{
 		reg:           reg,
 		defaultWeight: 10,

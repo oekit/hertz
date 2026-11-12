@@ -56,7 +56,15 @@ type InstanceWatcher struct {
 type WatchOption func(*InstanceWatcher)
 
 // WithWatchInterval 设置健康检查的轮询间隔时间。
+//
+// d <= 0 时 panic——构造期配置错误启动即暴露（与同文件 NewInstanceWatcher
+// 的 nil discoverer fail-fast 口径一致）。此前无校验：Start 内
+// time.NewTicker(h.interval) 对 0/负值直接 panic，而 Start 由业务自行起
+// goroutine 调用，panic 未包 recover 即进程退出（#218）。
 func WithWatchInterval(d time.Duration) WatchOption {
+	if d <= 0 {
+		panic("hertz: WithWatchInterval requires positive interval")
+	}
 	return func(h *InstanceWatcher) { h.interval = d }
 }
 
