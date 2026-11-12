@@ -330,7 +330,7 @@ func TestTrustedProxySetFor_Concurrent(t *testing.T) {
 		{"172.16.0.0/12", "192.168.0.0/16"},
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
+	for i := range 32 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -447,7 +447,7 @@ func TestResolver_NilSafe(t *testing.T) {
 // benchList 是 100 条 CIDR 的可信代理清单（多级网关 + 云 LB 段的典型规模）。
 var benchList = func() []string {
 	out := make([]string, 0, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		out = append(out, fmt.Sprintf("10.%d.%d.0/24", i/256, i%256))
 	}
 	return out
@@ -459,7 +459,7 @@ func BenchmarkGetClientIP_ListVariant_CacheHit(b *testing.B) {
 	c := app.NewContext(0)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = GetClientIP(c, benchList)
 	}
 }
@@ -473,7 +473,7 @@ func BenchmarkGetClientIPWithSet_PreParsed(b *testing.B) {
 	c := app.NewContext(0)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = GetClientIPWithSet(c, set)
 	}
 }
@@ -484,7 +484,7 @@ func BenchmarkGetClientIP_ParseEveryRequest(b *testing.B) {
 	c := app.NewContext(0)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = convert.ResolveClientIP(remoteAddr(c), c.Request.Header.Get("X-Forwarded-For"), benchList)
 	}
 }

@@ -91,7 +91,7 @@ func TestLimiterMiddleware_DynamicPolicy(t *testing.T) {
 	})
 
 	// 无配置:全放行
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if w := ut.PerformRequest(h.Engine, "POST", "/order", nil); w.Code != 200 {
 			t.Fatalf("no-config request %d: got %d, want 200", i, w.Code)
 		}
@@ -181,7 +181,7 @@ func TestLimiterMiddleware_GlobalPolicySharedBucket(t *testing.T) {
 
 	// 两个不同 path 交替请求：共享 rate=2 burst=2 的全局桶，合计只放行 2 个
 	allowed := 0
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		path := "/a"
 		if i%2 == 1 {
 			path = "/b"
@@ -210,7 +210,7 @@ func TestLimiterMiddleware_ConcurrentUpdateRace(t *testing.T) {
 	// 并发配置推送：交替更新策略
 	go func() {
 		defer close(done)
-		for i := 0; i < 50; i++ {
+		for range 50 {
 			cfg, err := governance.Parse([]byte(`{"limiter":{"POST:/race":{"rate":100,"burst":100}}}`))
 			if err != nil {
 				t.Error(err)
@@ -221,14 +221,12 @@ func TestLimiterMiddleware_ConcurrentUpdateRace(t *testing.T) {
 	}()
 	// 并发流量
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 20; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 20 {
 				ut.PerformRequest(h.Engine, "POST", "/race", nil)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	<-done

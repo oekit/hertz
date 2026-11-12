@@ -1,8 +1,10 @@
 package nns
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -252,11 +254,11 @@ func instancesChanged(a, b []ereg.Instance) bool {
 func sortInstances(instances []ereg.Instance) []ereg.Instance {
 	sorted := make([]ereg.Instance, len(instances))
 	copy(sorted, instances)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].IP != sorted[j].IP {
-			return sorted[i].IP < sorted[j].IP
+	slices.SortFunc(sorted, func(a, b ereg.Instance) int {
+		if c := strings.Compare(a.IP, b.IP); c != 0 {
+			return c
 		}
-		return sorted[i].Port < sorted[j].Port
+		return cmp.Compare(a.Port, b.Port)
 	})
 	return sorted
 }
