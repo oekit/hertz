@@ -163,8 +163,12 @@ func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 func NewTimeoutMiddleware(store *governance.Store) app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		if ms, ok := lookupTimeoutKey(store.Load().TimeoutMs, string(c.Method()), routePath(c)); ok && ms > 0 {
-			tctx, cancel := context.WithTimeout(ctx, time.Duration(ms)*time.Millisecond)
-			_ = cancel // #235:刻意不调用,到期由 WithTimeout 内部定时器取消(见 godoc)
+			d := time.Duration(ms) * time.Millisecond
+			tctx, cancel := context.WithTimeout(ctx, d)
+			// #235:不在中间件返回时取消。cancel 安排在 deadline 到点触发——
+			// 与 WithTimeout 内部定时器到点取消重复但幂等(cancel 可重入),
+			// 语义即「cancel 不早于 deadline」(见 godoc)。
+			time.AfterFunc(d, cancel)
 			ctx = tctx
 		}
 		c.Next(ctx)
