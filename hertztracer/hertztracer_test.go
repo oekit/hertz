@@ -14,9 +14,9 @@ import (
 )
 
 // serverOptionAsOption 证明 ServerOption 与 Option 是同一类型（别名）。
-func serverOptionAsOption(o ServerOption) Option { return o }
+func serverOptionAsOption(o ServerOption) TracerOption { return o }
 
-// countingTracer 记录 StartSpan 调用（次数 + span 名），用于钉住 Option 生效。
+// countingTracer 记录 StartSpan 调用（次数 + span 名），用于钉住 TracerOption 生效。
 type countingTracer struct {
 	mu       sync.Mutex
 	spans    int
@@ -83,22 +83,22 @@ func TestNewServerTracer_ReturnsTracer(t *testing.T) {
 	_ = h
 }
 
-// TestOption_TypeAlias 验证 Option 类型存在。
+// TestTracerOption_TypeAlias 验证 TracerOption 类型存在。
 func TestOption_TypeAlias(t *testing.T) {
-	var _ []Option
+	var _ []TracerOption
 	_ = client.NewClient
 	_ = app.NewContext(0)
 }
 
-// TestOption_IsNotBareStruct 钉住 AGENTS.md「禁止裸 Option」：Option 必须是
+// TestTracerOption_IsNotBareStruct 钉住 AGENTS.md「禁止裸 Option」：TracerOption 必须是
 // 有真实字段的选项类型（函数选项），不是空壳 struct{}。
 func TestOption_IsNotBareStruct(t *testing.T) {
 	opt := WithTracer(opentracing.NoopTracer{})
 	if opt == nil {
-		t.Fatal("WithTracer must return a usable Option")
+		t.Fatal("WithTracer must return a usable TracerOption")
 	}
 	// ServerOption 仍是 Option 的别名（历史导出名保留）——同型可直接互换。
-	cfg := newTracerConfig([]Option{serverOptionAsOption(opt)})
+	cfg := newTracerConfig([]TracerOption{serverOptionAsOption(opt)})
 	if cfg.tracer == nil {
 		t.Fatal("option must carry a real tracer")
 	}
