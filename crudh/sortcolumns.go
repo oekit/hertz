@@ -64,7 +64,7 @@ func collectEntityColumnsWithPrefix(t reflect.Type, cols map[string]string, seen
 	}
 	seen[t] = struct{}{}
 	timeType := reflect.TypeOf(time.Time{})
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		f := t.Field(i)
 		if f.PkgPath != "" {
 			// 非导出字段：不是 DB 列，不进白名单。

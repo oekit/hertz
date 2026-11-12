@@ -161,7 +161,7 @@ func TestStream_ConcurrentSendClose_NoRace(t *testing.T) {
 	addr, cleanup := startSSEServer(t, func(ctx context.Context, c *app.RequestContext) {
 		s := NewStream(c)
 		go func() {
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				_ = s.Send("tick", i)
 			}
 		}()

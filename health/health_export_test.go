@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"sort"
+	"slices"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -56,9 +56,9 @@ func assertJSONKeys(t *testing.T, label string, raw []byte, want ...string) {
 	for k := range obj {
 		got = append(got, k)
 	}
-	sort.Strings(got)
+	slices.Sort(got)
 	wantSorted := append([]string(nil), want...)
-	sort.Strings(wantSorted)
+	slices.Sort(wantSorted)
 	if !reflect.DeepEqual(got, wantSorted) {
 		t.Errorf("%s keys = %v, want %v (raw=%s)", label, got, wantSorted, raw)
 	}

@@ -68,45 +68,45 @@ func NewLogger(logger logx.Logger) hlog.FullLogger {
 
 // --- Logger 接口（7 级，variadic） ---
 
-func (a *hlogAdapter) Trace(v ...interface{})  { a.logger.Debug(fmt.Sprint(v...)) }
-func (a *hlogAdapter) Debug(v ...interface{})  { a.logger.Debug(fmt.Sprint(v...)) }
-func (a *hlogAdapter) Info(v ...interface{})   { a.logger.Info(fmt.Sprint(v...)) }
-func (a *hlogAdapter) Notice(v ...interface{}) { a.logger.Info(fmt.Sprint(v...)) }
-func (a *hlogAdapter) Warn(v ...interface{})   { a.logger.Warn(fmt.Sprint(v...)) }
-func (a *hlogAdapter) Error(v ...interface{})  { a.logger.Error(fmt.Sprint(v...)) }
-func (a *hlogAdapter) Fatal(v ...interface{})  { a.logger.Error(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Trace(v ...any)  { a.logger.Debug(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Debug(v ...any)  { a.logger.Debug(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Info(v ...any)   { a.logger.Info(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Notice(v ...any) { a.logger.Info(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Warn(v ...any)   { a.logger.Warn(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Error(v ...any)  { a.logger.Error(fmt.Sprint(v...)) }
+func (a *hlogAdapter) Fatal(v ...any)  { a.logger.Error(fmt.Sprint(v...)) }
 
 // --- FormatLogger 接口（7 级，printf 风格） ---
 
-func (a *hlogAdapter) Tracef(format string, v ...interface{})  { a.logger.Debugf(format, v...) }
-func (a *hlogAdapter) Debugf(format string, v ...interface{})  { a.logger.Debugf(format, v...) }
-func (a *hlogAdapter) Infof(format string, v ...interface{})   { a.logger.Infof(format, v...) }
-func (a *hlogAdapter) Noticef(format string, v ...interface{}) { a.logger.Infof(format, v...) }
-func (a *hlogAdapter) Warnf(format string, v ...interface{})   { a.logger.Warnf(format, v...) }
-func (a *hlogAdapter) Errorf(format string, v ...interface{})  { a.logger.Errorf(format, v...) }
-func (a *hlogAdapter) Fatalf(format string, v ...interface{})  { a.logger.Errorf(format, v...) }
+func (a *hlogAdapter) Tracef(format string, v ...any)  { a.logger.Debugf(format, v...) }
+func (a *hlogAdapter) Debugf(format string, v ...any)  { a.logger.Debugf(format, v...) }
+func (a *hlogAdapter) Infof(format string, v ...any)   { a.logger.Infof(format, v...) }
+func (a *hlogAdapter) Noticef(format string, v ...any) { a.logger.Infof(format, v...) }
+func (a *hlogAdapter) Warnf(format string, v ...any)   { a.logger.Warnf(format, v...) }
+func (a *hlogAdapter) Errorf(format string, v ...any)  { a.logger.Errorf(format, v...) }
+func (a *hlogAdapter) Fatalf(format string, v ...any)  { a.logger.Errorf(format, v...) }
 
 // --- CtxLogger 接口（7 级，context 感知，自动提取 trace_id） ---
 
-func (a *hlogAdapter) CtxTracef(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxTracef(ctx context.Context, format string, v ...any) {
 	a.logger.CtxDebugf(ctx, format, v...)
 }
-func (a *hlogAdapter) CtxDebugf(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxDebugf(ctx context.Context, format string, v ...any) {
 	a.logger.CtxDebugf(ctx, format, v...)
 }
-func (a *hlogAdapter) CtxInfof(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxInfof(ctx context.Context, format string, v ...any) {
 	a.logger.CtxInfof(ctx, format, v...)
 }
-func (a *hlogAdapter) CtxNoticef(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxNoticef(ctx context.Context, format string, v ...any) {
 	a.logger.CtxInfof(ctx, format, v...)
 }
-func (a *hlogAdapter) CtxWarnf(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxWarnf(ctx context.Context, format string, v ...any) {
 	a.logger.CtxWarnf(ctx, format, v...)
 }
-func (a *hlogAdapter) CtxErrorf(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxErrorf(ctx context.Context, format string, v ...any) {
 	a.logger.CtxErrorf(ctx, format, v...)
 }
-func (a *hlogAdapter) CtxFatalf(ctx context.Context, format string, v ...interface{}) {
+func (a *hlogAdapter) CtxFatalf(ctx context.Context, format string, v ...any) {
 	a.logger.CtxErrorf(ctx, format, v...)
 }
 

@@ -355,7 +355,7 @@ func runServerGodoc(t *testing.T) string {
 func BenchmarkNewLogger(b *testing.B) {
 	logger := logx.WithService("bench")
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		NewLogger(logger)
 	}
 }
@@ -363,7 +363,7 @@ func BenchmarkNewLogger(b *testing.B) {
 func BenchmarkHlogAdapter_Info(b *testing.B) {
 	logger := NewLogger(logx.WithService("bench"))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		logger.Info("benchmark message", "key", "value")
 	}
 }
@@ -372,7 +372,7 @@ func BenchmarkHlogAdapter_CtxInfof(b *testing.B) {
 	logger := NewLogger(logx.WithService("bench"))
 	ctx := context.Background()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		logger.CtxInfof(ctx, "benchmark message %d", i)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -219,7 +219,7 @@ func spaRootHint(fsys fs.FS) string {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	const maxShown = 5
 	suffix := ""
 	if len(names) > maxShown {
