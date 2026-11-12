@@ -47,6 +47,32 @@ func TestNewInstanceWatcher_WithOptions(t *testing.T) {
 	_ = called
 }
 
+// TestWithWatchInterval_NonPositivePanics 回归（#218）：非正间隔必须**构造期**
+// panic。此前无校验，0/负值存活到 Start 内 time.NewTicker 才 panic("non-positive
+// interval for NewTicker")，而 Start 由业务自行起 goroutine 调用，panic 未包
+// recover 即进程退出。fail-fast 口径对齐同文件 NewInstanceWatcher 的
+// nil discoverer。
+func TestWithWatchInterval_NonPositivePanics(t *testing.T) {
+	disc := &registrymocks.Discoverer{InstancesMap: make(map[string][]ereg.Instance)}
+	for name, d := range map[string]time.Duration{"zero": 0, "negative": -time.Second} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("WithWatchInterval(%v) must panic at construction (构造期 fail-fast, #218)", d)
+				}
+			}()
+			NewInstanceWatcher(disc, WithWatchInterval(d))
+		})
+	}
+}
+
+// TestWithWatchInterval_PositiveAccepted 钉住合法间隔不受构造期校验影响。
+func TestWithWatchInterval_PositiveAccepted(t *testing.T) {
+	disc := &registrymocks.Discoverer{InstancesMap: make(map[string][]ereg.Instance)}
+	h := NewInstanceWatcher(disc, WithWatchInterval(time.Millisecond))
+	assert.DeepEqual(t, time.Millisecond, h.interval)
+}
+
 func TestInstanceWatcher_GetHealthyInstances_Empty(t *testing.T) {
 	disc := &registrymocks.Discoverer{InstancesMap: make(map[string][]ereg.Instance)}
 	h := NewInstanceWatcher(disc)

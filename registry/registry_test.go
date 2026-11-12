@@ -21,6 +21,20 @@ func TestNewRegistry(t *testing.T) {
 	}
 }
 
+// TestNewRegistry_NilRegistrarPanics 回归（#219）：nil Registrar 必须**构造期**
+// panic——此前无校验，nil 接口上的 r.reg.Register(...) 拖到 engine.Spin 的
+// 注册路径（hertz 内部 goroutine）才 panic，症状是「启动期未知来源 panic」。
+// 文案口径与 nns 包 NewRegistry（"requires non-nil client"）对齐，两个
+// Registry 适配器对同一错误形态统一为构造期 fail-fast。
+func TestNewRegistry_NilRegistrarPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("NewRegistry(nil) must panic (构造期配置错误, #219)")
+		}
+	}()
+	NewRegistry(nil)
+}
+
 func TestRegistry_Register(t *testing.T) {
 	mock := &registrymocks.Registrar{}
 	r := NewRegistry(mock)

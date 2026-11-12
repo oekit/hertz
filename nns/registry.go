@@ -6,6 +6,7 @@ import (
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	nnsclient "github.com/oekit/nns/client"
+	ereg "github.com/oekit/registry"
 	"github.com/oekit/registry/sdbridge"
 )
 
@@ -46,6 +47,15 @@ func WithDefaultWeight(w int) RegistryOption {
 	return func(r *Registry) { r.defaultWeight = w }
 }
 
+// degraded 消息正文（#217 收敛前 Register/Deregister 两段各写一份，仅此
+// 文案与末行 Register/Deregister 调用不同）：register 路径附「服务不可被
+// 发现」说明，deregister 路径为历史短文案。对外错误全文 =
+// "nns-hertz registry: " + 正文，逐字保持不变。
+const (
+	degradedRegisterMsg   = "registrar unavailable (degraded, not mock mode); service would be undiscoverable"
+	degradedDeregisterMsg = "registrar unavailable (degraded, not mock mode)"
+)
+
 // NewRegistry 创建基于 NNS ServiceClient 的 Hertz Registry。
 //
 // 返回的 Registry 可直接传给 Hertz Server 的 [server.WithRegistry] 选项。
@@ -85,26 +95,13 @@ func (r *Registry) Register(info *hregistry.Info) error {
 // RegisterContext 与 [Registry.Register] 同语义，但显式传入 ctx
 // （可取消/可超时）。
 func (r *Registry) RegisterContext(ctx context.Context, info *hregistry.Info) error {
-	if info == nil {
-		return fmt.Errorf("nns-hertz registry: info is nil")
-	}
-
-	// weight <= 0 时使用 r.defaultWeight 兜底（委托 sdbridge.ToInstance）
-	inst, err := sdbridge.ToInstance(info.ServiceName, info.Addr, info.Weight, r.defaultWeight, info.Tags)
+	inst, err := buildInstance(info, r.defaultWeight)
 	if err != nil {
-		return fmt.Errorf("nns-hertz registry: %w", err)
+		return err
 	}
-
-	if r.client.GetRegistrar() == nil {
-		// mock 模式是有意跳过；非 mock 降级（启动时 Nacos 不可达）静默放行
-		// 会让服务"正常启动但永不可被发现"且无当次调用信号——显式报错
-		// 对齐 bootstrap Register 失败即回滚的行为
-		if r.client.MockMode() {
-			return nil // mock 模式：静默跳过
-		}
-		return fmt.Errorf("nns-hertz registry: registrar unavailable (degraded, not mock mode); service would be undiscoverable")
-	}
-	return r.client.GetRegistrar().Register(ctx, inst)
+	return r.applyRegistrar(degradedRegisterMsg, func(reg ereg.Registrar) error {
+		return reg.Register(ctx, inst)
+	})
 }
 
 // Deregister 从 NNS 注册中心注销 Hertz 服务实例。
@@ -117,20 +114,42 @@ func (r *Registry) Deregister(info *hregistry.Info) error {
 // DeregisterContext 与 [Registry.Deregister] 同语义，但显式传入 ctx
 // （可取消/可超时）。
 func (r *Registry) DeregisterContext(ctx context.Context, info *hregistry.Info) error {
-	if info == nil {
-		return fmt.Errorf("nns-hertz registry: info is nil")
-	}
-
-	inst, err := sdbridge.ToInstance(info.ServiceName, info.Addr, info.Weight, r.defaultWeight, info.Tags)
+	inst, err := buildInstance(info, r.defaultWeight)
 	if err != nil {
-		return fmt.Errorf("nns-hertz registry: %w", err)
+		return err
 	}
+	return r.applyRegistrar(degradedDeregisterMsg, func(reg ereg.Registrar) error {
+		return reg.Deregister(ctx, inst)
+	})
+}
 
-	if r.client.GetRegistrar() == nil {
+// buildInstance 把 Hertz Info 转为 ereg.Instance（#217 收敛 Register/
+// DeregisterContext 的共同前段）：info==nil 拒绝；weight<=0 时由 weight
+// 兜底参数（defaultWeight）兜底（委托 sdbridge.ToInstance）。
+func buildInstance(info *hregistry.Info, weight int) (ereg.Instance, error) {
+	if info == nil {
+		return ereg.Instance{}, fmt.Errorf("nns-hertz registry: info is nil")
+	}
+	inst, err := sdbridge.ToInstance(info.ServiceName, info.Addr, info.Weight, weight, info.Tags)
+	if err != nil {
+		return ereg.Instance{}, fmt.Errorf("nns-hertz registry: %w", err)
+	}
+	return inst, nil
+}
+
+// applyRegistrar 解析当前生效的 registrar 并执行 apply（#217 收敛
+// Register/DeregisterContext 的共同后段）：GetRegistrar()==nil 时按 mock
+// 口径收敛——mock 模式静默跳过（不调 apply，返回 nil），非 mock 降级
+// （启动时 Nacos 不可达）静默放行会让服务"正常启动但永不可被发现"且无
+// 当次调用信号——显式报错对齐 bootstrap Register 失败即回滚的行为
+// （降级文案由调用方传入，register/deregister 各自保持历史全文）。
+func (r *Registry) applyRegistrar(degradedMsg string, apply func(reg ereg.Registrar) error) error {
+	reg := r.client.GetRegistrar()
+	if reg == nil {
 		if r.client.MockMode() {
 			return nil // mock 模式：静默跳过
 		}
-		return fmt.Errorf("nns-hertz registry: registrar unavailable (degraded, not mock mode)")
+		return fmt.Errorf("nns-hertz registry: %s", degradedMsg)
 	}
-	return r.client.GetRegistrar().Deregister(ctx, inst)
+	return apply(reg)
 }
