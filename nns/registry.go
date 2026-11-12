@@ -138,13 +138,16 @@ func buildInstance(info *hregistry.Info, weight int) (ereg.Instance, error) {
 }
 
 // applyRegistrar 解析当前生效的 registrar 并执行 apply（#217 收敛
-// Register/DeregisterContext 的共同后段）：GetRegistrar()==nil 时按 mock
+// Register/DeregisterContext 的共同后段）：Registrar()==nil 时按 mock
 // 口径收敛——mock 模式静默跳过（不调 apply，返回 nil），非 mock 降级
 // （启动时 Nacos 不可达）静默放行会让服务"正常启动但永不可被发现"且无
 // 当次调用信号——显式报错对齐 bootstrap Register 失败即回滚的行为
 // （降级文案由调用方传入，register/deregister 各自保持历史全文）。
+//
+// 访问器用 Registrar()（nns v0.8.0 #146 双访问器收敛后 GetRegistrar 已
+// Deprecated；hertz 适配层随地板抬升一并迁移）。
 func (r *Registry) applyRegistrar(degradedMsg string, apply func(reg ereg.Registrar) error) error {
-	reg := r.client.GetRegistrar()
+	reg := r.client.Registrar()
 	if reg == nil {
 		if r.client.MockMode() {
 			return nil // mock 模式：静默跳过
