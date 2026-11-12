@@ -8,14 +8,14 @@ require (
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
 	github.com/oekit/bootstrap v0.7.8
 	github.com/oekit/concurrency v0.34.1
-	github.com/oekit/core v0.15.0
-	github.com/oekit/gormx v0.11.14
-	github.com/oekit/kitx v0.9.0
+	github.com/oekit/core v0.15.1
+	github.com/oekit/gormx v0.11.15
+	github.com/oekit/kitx v0.9.1
 	github.com/oekit/logx v0.10.0
 	github.com/oekit/metrics v0.3.0
 	github.com/oekit/middleware v0.18.0
 	github.com/oekit/nns v0.8.0
-	github.com/oekit/pkg v0.46.0
+	github.com/oekit/pkg v0.47.0
 	github.com/oekit/registry v0.5.15
 	github.com/oekit/registry/nacos v0.1.14
 	github.com/oekit/tracing v0.4.2
