@@ -1,3 +1,7 @@
+## [v0.11.5] — 2026-11-12
+
+- Go 1.26 现代化：hlogAdapter interface{}→any（23 处）、nns/health.go sort.Slice→slices.SortFunc、native_spa.go sort.Strings→slices.Sort、计数循环→range N、测试 fan-out→wg.Go；nns 适配层 Registrar() 迁移；依赖地板对齐 concurrency v0.34.1。纯等价重构+地板追平，行为零变更。
+
 ## [v0.11.4] — 2026-11-11
 
 - - build: 依赖地板对齐（floor sync，无代码变更）
