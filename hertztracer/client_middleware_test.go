@@ -20,9 +20,9 @@ import (
 
 // --- #177 回归：client 中间件必须真建 span 并注入 trace 上下文 ---
 //
-// 此前 NewClientMiddleware(_ ...Option) 直接转发上游 ClientCtx——后者只把 ctx
+// 此前 NewClientMiddleware(_ ...TracerOption) 直接转发上游 ClientCtx——后者只把 ctx
 // 里已有的 metainfo 写成 HTTP 头：不建 client span、不注入任何 trace 上下文，
-// 且显式传入的 Option 被无条件丢弃（_ ...Option）。出站调用在 trace 里不可见，
+// 且显式传入的 TracerOption 被无条件丢弃（_ ...TracerOption）。出站调用在 trace 里不可见，
 // 下游 ServerCtx 因查不到 JAEGERSPANCONTEXT 另起根 span，分布式链路断裂。
 
 // injectableTracer 记录 StartSpan / SetTag / LogFields，并把 Inject(Binary) 的
@@ -183,7 +183,7 @@ func TestClientMiddlewareStartsSpanAndInjects(t *testing.T) {
 	_ = req
 }
 
-// TestClientMiddleware_OptionsTakeEffect 钉住 Option 真正生效（此前 _ ...Option
+// TestClientMiddleware_OptionsTakeEffect 钉住 TracerOption 真正生效（此前 _ ...TracerOption
 // 把 WithTracer / 自定义 span 名原样丢弃）。
 func TestClientMiddleware_OptionsTakeEffect(t *testing.T) {
 	tr := &injectableTracer{}

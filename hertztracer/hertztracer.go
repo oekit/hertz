@@ -62,14 +62,21 @@ import (
 	opentracinglog "github.com/opentracing/opentracing-go/log"
 )
 
-// Option 是 hertztracer 的配置选项(函数选项模式;AGENTS.md「禁止裸 Option」)。
+// TracerOption 是 hertztracer 的配置选项(函数选项模式)。
+//
+// 命名红线(#247):此前导出裸 Option——AGENTS.md 明文「函数选项模式
+// XxxOption(禁止裸 Option,多包 co-import 冲突)」,而 hertztracer 与
+// cloudwego/hertz 的公共配置包(pkg/common/config,同样导出 Option)同属一个
+// hertz 应用的常见组合,消费方 dot-import 两个包直接编译失败。改名 TracerOption;
+// 旧裸名不保留兼容别名——别名本身就是上述冲突的根因(裸名一经导出,名字即占位,
+// 与是否被引用无关),保留等于保留缺陷。0.x 阶段 minor 允许 breaking(AGENTS.md);
+// 既有 ServerOption 别名保留,别名方向反转指向新名。
 //
 // 真实字段:tracer(OpenTracing tracer)与 span 名生成函数。
-type Option func(*tracerConfig)
+type TracerOption func(*tracerConfig)
 
-// ServerOption 是 Option 的历史别名(AGENTS.md「Option 类型命名 XxxOption」)。
-// 保留导出以兼容既有引用;勿删。
-type ServerOption = Option
+// ServerOption 是 TracerOption 的历史别名(保留导出以兼容既有引用;勿删)。
+type ServerOption = TracerOption
 
 // tracerConfig 是本包选项的配置载体。
 type tracerConfig struct {
@@ -82,25 +89,25 @@ type tracerConfig struct {
 
 // WithTracer 指定使用的 OpenTracing tracer。
 // nil 时用 opentracing.GlobalTracer()(未 SetGlobalTracer 时是 noop tracer)。
-func WithTracer(t opentracing.Tracer) Option {
+func WithTracer(t opentracing.Tracer) TracerOption {
 	return func(cfg *tracerConfig) { cfg.tracer = t }
 }
 
 // WithOperationName 指定 span 名生成函数。
 // nil 时用缺省 "<METHOD> <fullPath>"。
-func WithOperationName(fn func(c *app.RequestContext) string) Option {
+func WithOperationName(fn func(c *app.RequestContext) string) TracerOption {
 	return func(cfg *tracerConfig) { cfg.formOperationName = fn }
 }
 
 // WithClientOperationName 指定 client 中间件的 span 名生成函数
 // （server 侧的 [WithOperationName] 形参是 *app.RequestContext，client 侧
 // 只有 *protocol.Request，二者无法混用）。nil 时用缺省 "<METHOD> <path>"。
-func WithClientOperationName(fn func(req *protocol.Request) string) Option {
+func WithClientOperationName(fn func(req *protocol.Request) string) TracerOption {
 	return func(cfg *tracerConfig) { cfg.clientOperationName = fn }
 }
 
 // newTracerConfig 聚合选项并填缺省值。
-func newTracerConfig(opts []Option) *tracerConfig {
+func newTracerConfig(opts []TracerOption) *tracerConfig {
 	cfg := &tracerConfig{}
 	for _, opt := range opts {
 		if opt != nil {
@@ -143,7 +150,7 @@ func defaultClientOperationName(req *protocol.Request) string {
 // "get tracer container failed" 并**中断链路**(不 c.Next)——本实现改为自建
 // span,链路不中断;engine 装了 tracer 时仍走上游(engine 的 Finish 依赖上游
 // trace container 里的 span,必须由上游设置)。
-func NewServerMiddleware(opts ...Option) app.HandlerFunc {
+func NewServerMiddleware(opts ...TracerOption) app.HandlerFunc {
 	cfg := newTracerConfig(opts)
 	upstream := hertzcontribtracer.ServerCtx()
 	return func(ctx context.Context, c *app.RequestContext) {
@@ -177,7 +184,7 @@ type ServerTracing struct {
 //
 // 前提:业务已 opentracing.SetGlobalTracer(...) 初始化全局 tracer
 // (或用 [WithTracer] 显式指定)。
-func NewServerTracing(opts ...Option) ServerTracing {
+func NewServerTracing(opts ...TracerOption) ServerTracing {
 	cfg := newTracerConfig(opts)
 	tr := hertzcontribtracer.NewTracer(cfg.tracer, cfg.formOperationName)
 	return ServerTracing{
@@ -214,7 +221,7 @@ func NewServerTracing(opts ...Option) ServerTracing {
 // 上游 ClientTraceMW + ClientCtx 装配固有的约束，非本包引入；jaeger/zipkin
 // SDK 的 Binary 载体可配置文本安全形态，或用 [NewServerTracer] 侧同源的
 // tracer 时优先验证一次端到端链路。
-func NewClientMiddleware(opts ...Option) client.Middleware {
+func NewClientMiddleware(opts ...TracerOption) client.Middleware {
 	cfg := newTracerConfig(opts)
 	return func(next client.Endpoint) client.Endpoint {
 		return func(ctx context.Context, req *protocol.Request, resp *protocol.Response) (err error) {
