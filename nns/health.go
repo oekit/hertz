@@ -71,8 +71,14 @@ func WithWatchInterval(d time.Duration) WatchOption {
 }
 
 // WithWatchServices 设置需要健康检查的服务列表。
+//
+// #222：入口深拷贝落库——此前直接持有调用方切片（别名写穿），调用方构造后
+// 复用/改写同一底层数组会静默改变运行中 watcher 的服务集合（checkAll 每轮
+// 直接 range h.services）。与同包对同一风险面的既有纪律对齐
+// （GetHealthyInstances 深拷贝出参、cache 写入 deepCopyInstances、回调事件
+// 逐回调再拷贝）。
 func WithWatchServices(services ...string) WatchOption {
-	return func(h *InstanceWatcher) { h.services = services }
+	return func(h *InstanceWatcher) { h.services = slices.Clone(services) }
 }
 
 // WithWatchCallback 添加实例变更事件回调函数。
@@ -150,7 +156,7 @@ func (h *InstanceWatcher) checkAll(ctx context.Context) {
 func (h *InstanceWatcher) checkService(ctx context.Context, serviceName string) {
 	current, err := h.discoverer.Discover(ctx, serviceName)
 	if err != nil {
-		healthLog.Error("health check failed", "service", serviceName, "err", err)
+		healthLog.Error("health check failed", "service", serviceName, logx.ErrKey, err)
 		return
 	}
 

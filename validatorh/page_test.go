@@ -55,3 +55,41 @@ func TestBindPageWithDefault_FromQuery(t *testing.T) {
 		t.Errorf("PageSize = %d, want 100", p.PageSize)
 	}
 }
+
+// TestBindPage_RangeOverflowFallsBack 回归 #236：越界 page（Atoi 返回钳位值
+// + ErrRange）必须按非法值回落默认——此前错误被丢弃，Page=MaxInt64 一路传给
+// 消费方（拼游标/塞 SQL/翻页溢出），与 page=abc 回落默认的口径分裂。
+func TestBindPage_RangeOverflowFallsBack(t *testing.T) {
+	c := newTestContext("page=99999999999999999999")
+	p := BindPage(c)
+	if p.Page != 1 {
+		t.Errorf("Page = %d, want 1 (range overflow must fall back to default, not MaxInt64)", p.Page)
+	}
+	if p.PageSize != 20 {
+		t.Errorf("PageSize = %d, want 20 (default)", p.PageSize)
+	}
+}
+
+// TestBindPageWithDefault_RangeOverflow 同上，自定义默认值形态。
+func TestBindPageWithDefault_RangeOverflow(t *testing.T) {
+	c := newTestContext("page=99999999999999999999&page_size=99999999999999999999")
+	p := BindPageWithDefault(c, 5, 25)
+	if p.Page != 5 {
+		t.Errorf("Page = %d, want 5 (custom default; range overflow is an illegal value)", p.Page)
+	}
+	if p.PageSize != 25 {
+		t.Errorf("PageSize = %d, want 25 (custom default)", p.PageSize)
+	}
+}
+
+// TestBindPage_IllegalInputsUnified 钉住：page=abc（invalid syntax）与越界
+// 数值（ErrRange）口径一致——都回落默认。
+func TestBindPage_IllegalInputsUnified(t *testing.T) {
+	for _, q := range []string{"page=abc", "page=3.0", "page=9223372036854775808"} {
+		c := newTestContext(q)
+		p := BindPage(c)
+		if p.Page != 1 {
+			t.Errorf("q=%q: Page = %d, want 1 (all illegal values must fall back to default)", q, p.Page)
+		}
+	}
+}

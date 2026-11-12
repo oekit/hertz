@@ -196,13 +196,13 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 					return
 				}
 				bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
-					"name", name, "err", err)
+					logx.ErrKey, err)
 				app.RequestShutdown()
 			})
 		}
 		if err := h.Run(); err != nil {
 			bootstrapLog.Error("hertz server stopped with error, requesting shutdown",
-				"name", name, "err", err)
+				logx.ErrKey, err)
 			app.RequestShutdown()
 		}
 	})

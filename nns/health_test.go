@@ -410,3 +410,25 @@ func TestInstanceWatcher_CallbackMutationDoesNotCorruptCache(t *testing.T) {
 		t.Errorf("expected no extra event after second poll, got %d total", gotCount)
 	}
 }
+
+// TestWithWatchServices_ClonesInput 回归 #222：选项必须深拷贝入参——调用方
+// 构造后复用/改写同一底层数组不得改变 watcher 的服务集合（别名写穿）。
+// 与同包 GetHealthyInstances/cache/回调事件的深拷贝纪律对齐。
+func TestWithWatchServices_ClonesInput(t *testing.T) {
+	services := []string{"svc-a", "svc-b"}
+	opt := WithWatchServices(services...)
+	h := &InstanceWatcher{}
+	opt(h)
+
+	services[0] = "svc-hacked"
+	if h.services[0] != "svc-a" {
+		t.Fatalf("watcher services must not alias the caller slice, got %v", h.services)
+	}
+
+	// nil / 空变参合法（与既有口径一致）。
+	var nilWatcher InstanceWatcher
+	WithWatchServices()(&nilWatcher)
+	if nilWatcher.services != nil {
+		t.Errorf("WithWatchServices() with no args should keep services nil, got %v", nilWatcher.services)
+	}
+}
