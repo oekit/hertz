@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -182,52 +181,131 @@ func TestGetClientIPWithDefaultProxies_RealRequest(t *testing.T) {
 // convert.ResolveClientIP，后者每次调用都把整份清单 ParseCIDR 一遍
 // （每请求热路径开销），且非法条目错误被吞掉（静默降级为「不信任任何代理头」）。
 
-// mustPanicValue 断言 fn panic 并返回 panic 值（fail-fast 语义的测试钩子）。
-func mustPanicValue(t *testing.T, fn func()) any {
+// warnCounter 是 warnBadProxyList 的测试替身：计数 + 换装/还原。
+func withWarnSpy(t *testing.T) *int {
 	t.Helper()
-	var recovered any
-	func() {
-		defer func() { recovered = recover() }()
-		fn()
-	}()
-	if recovered == nil {
-		t.Fatal("expected panic, got none")
-	}
-	return recovered
+	count := 0
+	orig := warnBadProxyList
+	warnBadProxyList = func(error) { count++ }
+	t.Cleanup(func() { warnBadProxyList = orig })
+	return &count
 }
 
-// TestGetClientIP_InvalidEntryFailsFast 清单含非法条目时默认变体必须 fail-fast
-// （panic），不得静默跳过——静默跳过把「配置写错」变成「安全策略降级」且不可观测
-// （pkg#104 的形态）。
-func TestGetClientIP_InvalidEntryFailsFast(t *testing.T) {
+// TestGetClientIP_InvalidEntryFailsClosed 回归 #224：清单含非法条目时包级
+// 函数 fail-closed（不信任任何代理头，回退对端地址）+ 每份坏清单只告警一次，
+// **不 panic**——此前 panic 落在请求热路径：Recovery 缺失时冲垮连接、存在时
+// 每请求 500 + panic 栈噪声。
+func TestGetClientIP_InvalidEntryFailsClosed(t *testing.T) {
+	warns := withWarnSpy(t)
+
 	c := app.NewContext(0)
-	v := mustPanicValue(t, func() {
-		_ = GetClientIP(c, []string{"10.0.0.0/8", "not-a-cidr"})
-	})
-	msg, ok := v.(string)
+	c.Request.Header.Set("X-Forwarded-For", "9.9.9.9")
+
+	// 同一坏清单重复调用（不同切片实例，走内容指纹缓存）：恒 fail-closed，
+	// 行为一致且不 panic。
+	for range 3 {
+		if got := GetClientIP(c, []string{"10.0.0.0/8", "not-a-cidr"}); got != "0.0.0.0" {
+			t.Fatalf("invalid list must fail closed (peer address), got %q", got)
+		}
+	}
+	// 同一份坏清单只告警一次（错误缓存 + warnOnce）。
+	if *warns != 1 {
+		t.Errorf("warn count = %d, want 1 (one warn per distinct bad list)", *warns)
+	}
+
+	// 另一份坏清单（不同内容）是独立条目，各自告警一次。
+	if got := GetClientIP(c, []string{"203.0.113.5/33"}); got != "0.0.0.0" {
+		t.Fatalf("invalid list must fail closed, got %q", got)
+	}
+	if *warns != 2 {
+		t.Errorf("warn count = %d, want 2 (one per distinct bad list)", *warns)
+	}
+}
+
+// TestGetClientIPWithXRI_InvalidEntryFailsClosed XRI 变体同样 fail-closed
+// （不 panic），且错误经 warnBadProxyList 可观测。
+func TestGetClientIPWithXRI_InvalidEntryFailsClosed(t *testing.T) {
+	warns := withWarnSpy(t)
+
+	c := app.NewContext(0)
+	c.Request.Header.Set("X-Forwarded-For", "9.9.9.9")
+	c.Request.Header.Set("X-Real-IP", "8.8.8.8")
+	// 注意用独立内容的坏清单：坏清单条目按内容缓存、warnOnce 挂在条目上，
+	// 与其他测试复用同一内容会共享告警计数。
+	if got := GetClientIPWithXRI(c, []string{"198.51.100.999/24"}); got != "0.0.0.0" {
+		t.Fatalf("invalid list must fail closed (peer address), got %q", got)
+	}
+	if *warns != 1 {
+		t.Errorf("warn count = %d, want 1", *warns)
+	}
+}
+
+// TestTrustedProxySetFor_IdentityFastPath 回归 #237：同一底层数组的清单逐请求
+// 传入（启动期配置的标准形态）走 O(1) 身份快路径——同一集合指针复用，且身份
+// 缓存已收录；内容一致但不同底层数组的清单退到内容指纹路径，结果一致。
+func TestTrustedProxySetFor_IdentityFastPath(t *testing.T) {
+	list := []string{"10.0.0.0/8", "192.168.0.0/16"}
+
+	first := trustedProxySetFor(list)
+	second := trustedProxySetFor(list)
+	if first == nil || first != second {
+		t.Fatal("same backing array must reuse the cached set (identity fast path)")
+	}
+	k, _ := identityKeyOf(list)
+	if _, ok := proxySetByIdentity.Load(k); !ok {
+		t.Error("identity cache must record the list identity")
+	}
+
+	// 不同底层数组、内容一致：身份未命中 → 内容指纹命中，同一集合。
+	fresh := []string{"10.0.0.0/8", "192.168.0.0/16"}
+	if got := trustedProxySetFor(fresh); got != first {
+		t.Error("equal-content list must resolve to the same cached set")
+	}
+}
+
+// TestGetClientIPWithDefaultProxies_IdentityCached 回归 #237 附带项：默认清单
+// 是包内单一副本，逐请求调用稳定命中身份快路径（不再每请求拷贝一份清单）。
+func TestGetClientIPWithDefaultProxies_IdentityCached(t *testing.T) {
+	c := app.NewContext(0)
+	for range 3 {
+		if got := GetClientIPWithDefaultProxies(c); got != "0.0.0.0" {
+			t.Fatalf("default proxies resolve = %q, want 0.0.0.0", got)
+		}
+	}
+	k, ok := identityKeyOf(defaultTrustedProxiesList)
 	if !ok {
-		t.Fatalf("panic value = %T, want string", v)
+		t.Fatal("default list must be non-empty")
 	}
-	if !strings.Contains(msg, "not-a-cidr") {
-		t.Errorf("panic message %q must mention the invalid entry", msg)
-	}
-	// 错误已缓存：第二次调用（同清单）恒 fail-fast，行为一致。
-	v2 := mustPanicValue(t, func() {
-		_ = GetClientIP(c, []string{"10.0.0.0/8", "not-a-cidr"})
-	})
-	if v2.(string) != msg {
-		t.Errorf("cached failure must be deterministic: %q vs %q", v2, msg)
+	if _, ok := proxySetByIdentity.Load(k); !ok {
+		t.Error("default list must be identity-cached (single package-owned copy)")
 	}
 }
 
-// TestGetClientIPWithXRI_InvalidEntryFailsFast XRI 变体同样 fail-fast。
-func TestGetClientIPWithXRI_InvalidEntryFailsFast(t *testing.T) {
-	c := app.NewContext(0)
-	v := mustPanicValue(t, func() {
-		_ = GetClientIPWithXRI(c, []string{"203.0.113.5/33"})
-	})
-	if !strings.Contains(v.(string), "203.0.113.5/33") {
-		t.Errorf("panic message %q must mention the invalid entry", v)
+// BenchmarkTrustedProxySetFor_Scaling 钉住「清单形态 vs 预解析形态」的差额
+// （#237）：身份快路径命中后应与预解析形态同量级（不再随清单长度线性增长）。
+func BenchmarkTrustedProxySetFor_Scaling(b *testing.B) {
+	sizes := []int{1, 10, 100, 1000}
+	for _, n := range sizes {
+		list := make([]string, n)
+		for i := range n {
+			list[i] = fmt.Sprintf("10.%d.%d.0/24", (i>>8)&0xff, i&0xff)
+		}
+		set, err := convert.NewTrustedProxySet(list)
+		if err != nil {
+			b.Fatalf("parse: %v", err)
+		}
+		b.Run(fmt.Sprintf("list-%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = trustedProxySetFor(list)
+			}
+		})
+		b.Run(fmt.Sprintf("set-%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = set
+			}
+		})
 	}
 }
 
@@ -295,7 +373,7 @@ func TestTrustedProxySetFor_CachesByContent(t *testing.T) {
 	if setA1 != setA2 {
 		t.Error("same list must reuse the cached set (pointer identity)")
 	}
-	if _, err := lookupProxySetBucket(getOrCreateProxySetBucket(proxyListHash(listA)), listA); err != nil || setA1 == nil {
+	if e := lookupProxySetEntry(getOrCreateProxySetBucket(proxyListHash(listA)), listA); e == nil || e.err != nil {
 		t.Error("list A must be cached")
 	}
 
@@ -359,7 +437,7 @@ func TestTrustedProxySetFor_CacheLimit(t *testing.T) {
 	// 上限之后的清单不再入缓存，但仍解析正确。
 	list := []string{"203.0.113.0/24"}
 	_ = trustedProxySetFor(list)
-	if set, err := lookupProxySetBucket(getOrCreateProxySetBucket(proxyListHash(list)), list); set != nil || err != nil {
+	if e := lookupProxySetEntry(getOrCreateProxySetBucket(proxyListHash(list)), list); e != nil {
 		t.Error("entries beyond the limit must not be cached")
 	}
 	c := app.NewContext(0)

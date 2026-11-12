@@ -366,9 +366,9 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 				status, errText := checkResultStatus(err, timedOut, verbose)
 				res.Status, res.Error = status, errText
 				if err != nil && status == StatusError {
-					logx.CtxError(runCtx, "health check failed", "name", checker.Name, "err", err)
+					logx.CtxError(runCtx, "health check failed", logx.ErrKey, err)
 				} else if err != nil {
-					logx.CtxWarn(runCtx, "health check degraded", "name", checker.Name, "err", err)
+					logx.CtxWarn(runCtx, "health check degraded", logx.ErrKey, err)
 				}
 				ch <- indexedResult{idx: i, res: res}
 			})

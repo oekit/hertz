@@ -64,7 +64,11 @@ func NewStream(c *app.RequestContext) *Stream {
 // Send 发送一个 JSON 序列化的事件。
 //
 // eventType 为 SSE 事件类型（客户端通过 EventSource.addEventListener 监听），
-// data 会被 JSON 序列化为事件数据。data 为 nil 时发送空 data。
+// data 会被 JSON 序列化为事件数据。data 为 nil 时发送空 data——显式写一行
+// **空值 data: 字段**（#229）：上游 Writer 对零长度 data 一个字节都不写
+// （无 data 行），而按 SSE 规范 data buffer 为空 ⇒ 事件不被派发，浏览器端
+// 一个事件都收不到（心跳/ping/完成通知这类无负载事件全部哑火，且服务端
+// 无任何错误信号）。写入空值 data 行后事件按规范派发，客户端收到空 data。
 //
 // ⚠️ **空 eventType 的上游行为**（已查证 hertz pkg/protocol/sse）：
 // 上游 Writer.Write 只在 Event.IsSetType() 为真时写 "event:" 行，而
@@ -86,6 +90,11 @@ func (s *Stream) Send(eventType string, data any) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		// #229：上游 Write 对 len(data)==0 的循环体一次都不进（无 data 行）。
+		// 单字节 '\n' 恰好让上游按「多行 data」拆出一行空值 data: 字段
+		// （"data: "），事件得以派发、data buffer 归一为空串。
+		payload = []byte{'\n'}
 	}
 
 	return s.w.WriteEvent("", eventType, payload)

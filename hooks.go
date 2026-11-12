@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/oekit/logx"
 )
 
 // AddShutdownHook 注册 Hertz 优雅退出钩子函数,等价于官方教程推荐的
@@ -41,7 +42,7 @@ func AddShutdownHook(h *server.Hertz, fn func(ctx context.Context) error) {
 	h.OnShutdown = append(h.OnShutdown, func(ctx context.Context) {
 		if err := fn(ctx); err != nil {
 			bootstrapLog.Warn("shutdown hook returned error",
-				"err", err.Error())
+				logx.ErrKey, err)
 		}
 	})
 }

@@ -162,3 +162,36 @@ func TestMetricsHandlerFor_NilGathererPanics(t *testing.T) {
 	}()
 	_ = MetricsHandlerFor(nil)
 }
+
+// TestMetricsHandler_OpenMetricsNegotiation 回归 #228：带 Accept:
+// application/openmetrics-text 的客户端必须拿到 OpenMetrics 格式（Content-Type
+// 匹配 + body 以 # EOF 收尾）——此前 HandlerOpts 没开 EnableOpenMetrics，
+// promhttp 可用格式集合里根本没有 OpenMetrics，一律静默回退 text/plain。
+func TestMetricsHandler_OpenMetricsNegotiation(t *testing.T) {
+	metrics.Init("metrics-openmetrics-test")
+
+	h := server.New(server.WithHostPorts("127.0.0.1:0"))
+	h.GET("/metrics", MetricsHandler())
+
+	resp := ut.PerformRequest(h.Engine, consts.MethodGet, "/metrics", nil,
+		ut.Header{Key: "Accept", Value: "application/openmetrics-text; version=1.0.0; charset=utf-8"},
+	).Result()
+	if resp.StatusCode() != consts.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want 200", resp.StatusCode())
+	}
+	ct := string(resp.Header.Peek("Content-Type"))
+	if !strings.Contains(ct, "application/openmetrics-text") {
+		t.Errorf("Content-Type = %q, want application/openmetrics-text (EnableOpenMetrics must be on, #228)", ct)
+	}
+	if body := strings.TrimSpace(string(resp.Body())); !strings.HasSuffix(body, "# EOF") {
+		t.Errorf("body must end with the OpenMetrics '# EOF' terminator, got ...%q", body[max(0, len(body)-40):])
+	}
+
+	// 对照：普通 text 客户端不受影响，仍拿 text/plain。
+	resp = ut.PerformRequest(h.Engine, consts.MethodGet, "/metrics", nil,
+		ut.Header{Key: "Accept", Value: "text/plain"},
+	).Result()
+	if ct := string(resp.Header.Peek("Content-Type")); !strings.Contains(ct, "text/plain") {
+		t.Errorf("plain Accept: Content-Type = %q, want text/plain", ct)
+	}
+}

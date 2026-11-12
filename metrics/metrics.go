@@ -64,6 +64,15 @@ func MetricsHandlerFor(gatherer prometheus.Gatherer) app.HandlerFunc {
 // 每次注册端点/每次调用都重建纯属浪费。缓存后同一 Gatherer 只建一次。
 var handlerCache sync.Map // prometheus.Gatherer → http.Handler
 
+// promHandlerOpts 是 promhttp 的统一构造参数（#228）：EnableOpenMetrics 必须
+// 开启——promhttp 不开此项时可用格式集合里根本没有 OpenMetrics
+// （expfmt.DefaultAcceptedFormats 不含任何 OpenMetrics 格式），客户端带
+// Accept: application/openmetrics-text 一律静默回退 text/plain，godoc 承诺的
+// 「OpenMetrics 格式协商正常生效」不成立（Prometheus 2.5+/3.x 抓取端默认就带
+// 该 Accept，exemplar/转义语义随之丢失）。两处 HandlerFor 共用同一变量，
+// 避免分叉漏改。
+var promHandlerOpts = promhttp.HandlerOpts{EnableOpenMetrics: true}
+
 // promHandlerFor 返回（并缓存）指定 Gatherer 对应的 promhttp handler。
 //
 // nil 防御分支保留（本函数是包内公共落点），但 MetricsHandlerFor 已在构造期
@@ -76,12 +85,12 @@ func promHandlerFor(gatherer prometheus.Gatherer) http.Handler {
 		return nil
 	}
 	if t := reflect.TypeOf(gatherer); t != nil && !t.Comparable() {
-		return promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+		return promhttp.HandlerFor(gatherer, promHandlerOpts)
 	}
 	if cached, ok := handlerCache.Load(gatherer); ok {
 		return cached.(http.Handler)
 	}
-	created := promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})
+	created := promhttp.HandlerFor(gatherer, promHandlerOpts)
 	actual, _ := handlerCache.LoadOrStore(gatherer, created)
 	return actual.(http.Handler)
 }
