@@ -1,3 +1,7 @@
+## [v0.11.6] — 2026-11-13
+
+- 17 单修复批：governance 四单（#233-#235/#223）、clientip 缓存快路径（#237）、BindPage Atoi（#236）、超时 defer cancel 移除（#235）、限流初始令牌（#234）、SSE data 行（#229）、裸 Option 改名（#247）、err 字面量收编（#231）等；地板对齐 pkg v0.47.0。
+
 ## [v0.11.5] — 2026-11-12
 
 - refactor: 全矩阵 issue 清零战役 hertz 侧——crudh/handler.go 1109 行同包拆为 handler/options/sortcolumns/query 四文件，无 API 变化（#215）；transportx 删 requestHeader/replyHeader 两对逐字重复的 Values/Keys 方法，退化为 core/transport/hertzbridge 单源薄委托（随 core v0.15.0，#216，#163 的 EqualFold 键口径与 replyHeader 追加语义随单源固化）；nns/registry.go RegisterContext/DeregisterContext 四段近似块收敛为 buildInstance/applyRegistrar 两个 helper（#217）；WithWatchInterval 对非正间隔构造期 panic fail-fast，消灭 Start 内 time.NewTicker 运行期 panic（#218）；registry.NewRegistry 对 nil Registrar 构造期 panic，与 nns 包 fail-fast 口径统一（#219）
