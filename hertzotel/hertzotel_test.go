@@ -8,7 +8,6 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/config"
-	serverconfig "github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/tracer/traceinfo"
 	"github.com/cloudwego/hertz/pkg/route"
 	hertzcontribtracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
@@ -319,7 +318,7 @@ func TestNewServerTracing_PairedInstall_NoDiagnostic(t *testing.T) {
 
 	tracing := NewServerTracing()
 	// Option 落地：应用到 serverconfig.Options（模拟 server.New 的装配动作）。
-	var opts serverconfig.Options
+	var opts config.Options
 	tracing.Option.F(&opts)
 
 	c := app.NewContext(0)

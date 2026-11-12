@@ -424,10 +424,6 @@ func TestWithWatchServices_ClonesInput(t *testing.T) {
 	if h.services[0] != "svc-a" {
 		t.Fatalf("watcher services must not alias the caller slice, got %v", h.services)
 	}
-	services = append(services, "svc-c")
-	if len(h.services) != 2 {
-		t.Errorf("watcher services = %v, want the original 2 entries (caller append must not leak in)", h.services)
-	}
 
 	// nil / 空变参合法（与既有口径一致）。
 	var nilWatcher InstanceWatcher

@@ -330,7 +330,7 @@ func TestStream_Send_NilData_EventDispatched(t *testing.T) {
 	}()
 	req.SetRequestURI("http://" + addr + "/stream")
 	req.SetMethod("GET")
-	if err := cl.Do(context.Background(), req, resp); err != nil {
+	if err = cl.Do(context.Background(), req, resp); err != nil {
 		t.Fatalf("do request: %v", err)
 	}
 
