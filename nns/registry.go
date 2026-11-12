@@ -95,7 +95,7 @@ func (r *Registry) RegisterContext(ctx context.Context, info *hregistry.Info) er
 		return fmt.Errorf("nns-hertz registry: %w", err)
 	}
 
-	if r.client.GetRegistrar() == nil {
+	if r.client.Registrar() == nil {
 		// mock 模式是有意跳过；非 mock 降级（启动时 Nacos 不可达）静默放行
 		// 会让服务"正常启动但永不可被发现"且无当次调用信号——显式报错
 		// 对齐 bootstrap Register 失败即回滚的行为
@@ -104,7 +104,7 @@ func (r *Registry) RegisterContext(ctx context.Context, info *hregistry.Info) er
 		}
 		return fmt.Errorf("nns-hertz registry: registrar unavailable (degraded, not mock mode); service would be undiscoverable")
 	}
-	return r.client.GetRegistrar().Register(ctx, inst)
+	return r.client.Registrar().Register(ctx, inst)
 }
 
 // Deregister 从 NNS 注册中心注销 Hertz 服务实例。
@@ -126,11 +126,11 @@ func (r *Registry) DeregisterContext(ctx context.Context, info *hregistry.Info) 
 		return fmt.Errorf("nns-hertz registry: %w", err)
 	}
 
-	if r.client.GetRegistrar() == nil {
+	if r.client.Registrar() == nil {
 		if r.client.MockMode() {
 			return nil // mock 模式：静默跳过
 		}
 		return fmt.Errorf("nns-hertz registry: registrar unavailable (degraded, not mock mode)")
 	}
-	return r.client.GetRegistrar().Deregister(ctx, inst)
+	return r.client.Registrar().Deregister(ctx, inst)
 }
