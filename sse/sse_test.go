@@ -301,3 +301,71 @@ func TestClient_ReaderForEach(t *testing.T) {
 	assert.DeepEqual(t, []string{"hello", "world"}, datas)
 	assert.DeepEqual(t, "id-2", r.LastEventID())
 }
+
+// TestStream_Send_NilData_EventDispatched 回归 #229：Send(type, nil) 必须写出
+// data: 字段（此前无 data 行 ⇒ 按 SSE 规范事件不被派发，浏览器一个事件都收
+// 不到），且官方 Reader 能收到该事件（空 data 事件被派发）。
+func TestStream_Send_NilData_EventDispatched(t *testing.T) {
+	addr, cleanup := startSSEServer(t, func(ctx context.Context, c *app.RequestContext) {
+		s := NewStream(c)
+		_ = s.Send("ping", nil)
+		_ = s.Close()
+	})
+	defer cleanup()
+
+	body := string(requestSSE(t, addr))
+	// 线上字节：必须存在 data: 行（空值 data 字段）。
+	assert.DeepEqual(t, true, contains(body, "event: ping"))
+	assert.DeepEqual(t, true, contains(body, "data: "))
+
+	// 客户端侧：官方 Reader 必须把该事件派发出来（data 为空）。
+	cl, err := client.NewClient()
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	req, resp := protocol.AcquireRequest(), protocol.AcquireResponse()
+	defer func() {
+		protocol.ReleaseRequest(req)
+		protocol.ReleaseResponse(resp)
+	}()
+	req.SetRequestURI("http://" + addr + "/stream")
+	req.SetMethod("GET")
+	if err := cl.Do(context.Background(), req, resp); err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+
+	r, err := NewReader(resp)
+	if err != nil {
+		t.Fatalf("new reader: %v", err)
+	}
+	events := 0
+	var gotType string
+	err = r.ForEach(context.Background(), func(e *Event) error {
+		events++
+		gotType = e.Type
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ForEach: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("events = %d, want 1 (nil-data event must still be dispatched, #229)", events)
+	}
+	if gotType != "ping" {
+		t.Errorf("event type = %q, want ping", gotType)
+	}
+}
+
+// TestStream_Send_NilData_Bytes 钉住线上字节形态：Send("ping", nil) 产出
+// "event: ping\ndata: \n\n"——空值 data 行让 data buffer 归一为空串后按规范
+// 派发，客户端 event.data === ""。
+func TestStream_Send_NilData_Bytes(t *testing.T) {
+	addr, cleanup := startSSEServer(t, func(ctx context.Context, c *app.RequestContext) {
+		s := NewStream(c)
+		_ = s.Send("ping", nil)
+		_ = s.Close()
+	})
+	defer cleanup()
+
+	assert.DeepEqual(t, "event: ping\ndata: \n\n", string(requestSSE(t, addr)))
+}

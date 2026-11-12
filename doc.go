@@ -49,8 +49,10 @@
 //   - < v0.9.6：SIGTERM 立即退出；SIGINT/SIGHUP 触发优雅退出
 //
 // ekit bootstrap 同时监听 SIGINT/SIGTERM，与 Hertz 内置处理并发触发。
-// RunServer 内部已容忍双路 Shutdown 竞态（hertz 返回 "engine is not running" 视为成功），
-// 用户无需额外处理。
+// RunServer 内部已容忍双路 Shutdown 竞态：按进入关闭回调时的 engine 状态
+// 采样（wasRunning）判定竞争败者，不做错误文本匹配（hertz 未导出该
+// sentinel、文案无兼容承诺，#179）——败者路的 Shutdown 错误一律视为成功，
+// 首发关停路的真错误照常上抛，用户无需额外处理。
 //
 // 优雅退出流程（Hertz 内部，对照官方文档）：
 //  1. engine 状态设为 closed

@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/config"
+	serverconfig "github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/tracer/traceinfo"
 	"github.com/cloudwego/hertz/pkg/route"
 	hertzcontribtracing "github.com/hertz-contrib/obs-opentelemetry/tracing"
@@ -263,5 +264,70 @@ func TestNewServerTracer_MarksPairedInstallState(t *testing.T) {
 	NewServerTracing()
 	if !serverTracerCreated.Load() {
 		t.Error("NewServerTracing must mark the paired-install state (#168)")
+	}
+}
+
+// TestNewServerTracing_HalfInstalled_Diagnoses 回归 #230：NewServerTracing 只
+// h.Use(Middleware)、不把 Option 传给 server.New（半装配）⇒ 本包缺失诊断必须
+// 触发。此前 Middleware 是上游裸中间件（无诊断包装），判据 serverTracerCreated
+// 又被本函数自己置位——诊断在主推入口上结构性失效（#168 修法残留）。
+func TestNewServerTracing_HalfInstalled_Diagnoses(t *testing.T) {
+	var warned int
+	orig := missingServerTracerWarn
+	missingServerTracerWarn = func() { warned++ }
+	defer func() { missingServerTracerWarn = orig }()
+
+	tracing := NewServerTracing()
+	c := app.NewContext(0)
+	c.Request.SetMethod("GET")
+	// engine 零 tracer 场景（RequestContext 无 TraceInfo）⇒ 判据第一支命中。
+	tracing.Middleware(context.Background(), c)
+
+	if warned == 0 {
+		t.Error("half-installed ServerTracing (Middleware used without Option) must be diagnosed (#230)")
+	}
+}
+
+// TestNewServerTracing_OptionNotApplied_Diagnoses 钉住判据第二支：engine 预置了
+// TraceInfo（挂了任意 tracer）但**本对组件的 Option 从未被应用**（没传给
+// server.New）⇒ 诊断仍必须触发——判据必须是「本对组件的 Option 是否真的落地」，
+// 不是进程级「创建过 tracer」（后者被本函数一调用就置位，恒为真）。
+func TestNewServerTracing_OptionNotApplied_Diagnoses(t *testing.T) {
+	var warned int
+	orig := missingServerTracerWarn
+	missingServerTracerWarn = func() { warned++ }
+	defer func() { missingServerTracerWarn = orig }()
+
+	tracing := NewServerTracing()
+	c := app.NewContext(0)
+	c.Request.SetMethod("GET")
+	c.SetTraceInfo(traceinfo.NewTraceInfo())
+	tracing.Middleware(context.Background(), c)
+
+	if warned == 0 {
+		t.Error("ServerTracing whose Option was never applied must be diagnosed (#230)")
+	}
+}
+
+// TestNewServerTracing_PairedInstall_NoDiagnostic 成对安装（Option 实际应用到
+// server config）后不得误报。
+func TestNewServerTracing_PairedInstall_NoDiagnostic(t *testing.T) {
+	var warned int
+	orig := missingServerTracerWarn
+	missingServerTracerWarn = func() { warned++ }
+	defer func() { missingServerTracerWarn = orig }()
+
+	tracing := NewServerTracing()
+	// Option 落地：应用到 serverconfig.Options（模拟 server.New 的装配动作）。
+	var opts serverconfig.Options
+	tracing.Option.F(&opts)
+
+	c := app.NewContext(0)
+	c.Request.SetMethod("GET")
+	c.SetTraceInfo(traceinfo.NewTraceInfo())
+	tracing.Middleware(context.Background(), c)
+
+	if warned != 0 {
+		t.Errorf("paired install must not diagnose (warned %d times)", warned)
 	}
 }
