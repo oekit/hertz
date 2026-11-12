@@ -1,7 +1,7 @@
 ## [v0.11.5] — 2026-11-12
 
 - refactor: 全矩阵 issue 清零战役 hertz 侧——crudh/handler.go 1109 行同包拆为 handler/options/sortcolumns/query 四文件，无 API 变化（#215）；transportx 删 requestHeader/replyHeader 两对逐字重复的 Values/Keys 方法，退化为 core/transport/hertzbridge 单源薄委托（随 core v0.15.0，#216，#163 的 EqualFold 键口径与 replyHeader 追加语义随单源固化）；nns/registry.go RegisterContext/DeregisterContext 四段近似块收敛为 buildInstance/applyRegistrar 两个 helper（#217）；WithWatchInterval 对非正间隔构造期 panic fail-fast，消灭 Start 内 time.NewTicker 运行期 panic（#218）；registry.NewRegistry 对 nil Registrar 构造期 panic，与 nns 包 fail-fast 口径统一（#219）
-- Go 1.26 现代化：hlogAdapter interface{}→any（23 处）、nns/health.go sort.Slice→slices.SortFunc、native_spa.go sort.Strings→slices.Sort、计数循环→range N、测试 fan-out→wg.Go；nns 适配层 Registrar() 迁移；依赖地板对齐 concurrency v0.34.1、core v0.15.0、bootstrap v0.7.8。纯等价重构+地板追平，行为零变更。
+- Go 1.26 现代化：hlogAdapter interface{}→any（23 处）、nns/health.go sort.Slice→slices.SortFunc、native_spa.go sort.Strings→slices.Sort、计数循环→range N、测试 fan-out→wg.Go；nns 适配层 Registrar() 迁移；依赖地板对齐 concurrency v0.34.1、core v0.15.0、bootstrap v0.7.8、tracing v0.4.2。纯等价重构+地板追平，行为零变更。
 
 关联问题单：hertz#215、hertz#216、hertz#217、hertz#218、hertz#219。
 
