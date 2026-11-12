@@ -186,9 +186,16 @@ type ServerTracing struct {
 //
 // ⚠️ 返回值的两个字段必须**成对用满**(MustUse):Option 传给 server.New(),
 // Middleware 通过 h.Use 注册——只注册 Middleware 不装 Option 不会产 span
-// (span 依赖装在 server 上的 tracer 注入 carrier)。缺一形态的哑火由
-// NewServerMiddleware 的缺失诊断兜底(#168,判据含进程级「已配对安装」
-// 状态 serverTracerCreated,由本函数置位)。
+// (span 依赖装在 server 上的 tracer 注入 carrier)。缺一形态的哑火由本对
+// Middleware **自带**的缺失诊断兜底(#230):判据是「本对组件的 Option 是否
+// 真的被应用过」——Option 被包了一层落地打点(应用到 serverconfig.Options
+// 即置位 installed),Middleware 请求期据此告警(每进程一次)。此前返回上游
+// 裸中间件,而判据看的进程级 serverTracerCreated 本函数一被调用就置位——
+// 诊断在主推入口上结构性失效(#230)。
+//
+// 局限与 [serverTracerCreated] 同款:判据表达不了「Option 装到了**这台**
+// engine」——把 Option 装上 engine A、把 Middleware 挂到挂了其他 tracer 的
+// engine B 上时探测不到(进程粒度限制,见 serverTracerCreated 说明)。
 //
 // 使用方式:
 //
@@ -198,9 +205,26 @@ type ServerTracing struct {
 func NewServerTracing(opts ...HertzOtelOption) ServerTracing {
 	option, cfg := hertzcontribtracing.NewServerTracer(opts...)
 	markServerTracerCreated()
+	// #230：Option 落地打点——包装上游 Option,在其被 server.New 实际应用时
+	// 置位 installed。「创建过 tracer」(serverTracerCreated,本函数一进来就
+	// 置位)表达不了「成对安装」,判据用它恒不可能命中本入口的半装配。
+	var installed atomic.Bool
+	wrapped := serverconfig.Option{F: func(o *serverconfig.Options) {
+		option.F(o)
+		installed.Store(true)
+	}}
+	mw := hertzcontribtracing.ServerMiddleware(cfg)
 	return ServerTracing{
-		Option:     option,
-		Middleware: hertzcontribtracing.ServerMiddleware(cfg),
+		Option: wrapped,
+		Middleware: func(ctx context.Context, c *app.RequestContext) {
+			if c.GetTraceInfo() == nil || !installed.Load() {
+				// 本对组件的 Option 没装上本 engine(engine 零 tracer,或
+				// Option 压根没传给 server.New)⇒ 上游 Start 不会放入
+				// trace carrier ⇒ 静默不产 span。显式诊断,避免哑火。
+				missingServerTracerWarn()
+			}
+			mw(ctx, c)
+		},
 	}
 }
 
