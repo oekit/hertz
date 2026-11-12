@@ -6,19 +6,19 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/bootstrap v0.7.6
-	github.com/oekit/concurrency v0.33.0
-	github.com/oekit/core v0.14.2
-	github.com/oekit/gormx v0.11.13
-	github.com/oekit/kitx v0.8.0
-	github.com/oekit/logx v0.9.2
-	github.com/oekit/metrics v0.2.4
+	github.com/oekit/bootstrap v0.7.7
+	github.com/oekit/concurrency v0.34.0
+	github.com/oekit/core v0.14.3-0.20261111201459-c0f8a3febb68
+	github.com/oekit/gormx v0.11.14
+	github.com/oekit/kitx v0.9.0
+	github.com/oekit/logx v0.10.0
+	github.com/oekit/metrics v0.3.0
 	github.com/oekit/middleware v0.17.0
-	github.com/oekit/nns v0.6.0
-	github.com/oekit/pkg v0.44.0
-	github.com/oekit/registry v0.5.14
-	github.com/oekit/registry/nacos v0.1.13
-	github.com/oekit/tracing v0.4.0
+	github.com/oekit/nns v0.8.0
+	github.com/oekit/pkg v0.46.0
+	github.com/oekit/registry v0.5.15
+	github.com/oekit/registry/nacos v0.1.14
+	github.com/oekit/tracing v0.4.1
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -36,7 +36,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/leodido/go-urn v1.5.0 // indirect
-	github.com/oekit/registry/nacosimpl v0.1.14 // indirect
+	github.com/oekit/registry/nacosimpl v0.2.0 // indirect
 	go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.45.0 // indirect
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 )
@@ -86,8 +86,8 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nacos-group/nacos-sdk-go/v2 v2.3.6-0.20260601044846-0e3d1d099507 // indirect
-	github.com/oekit/logx/hlog v0.1.11
+	github.com/nacos-group/nacos-sdk-go/v2 v2.3.6 // indirect
+	github.com/oekit/logx/hlog v0.1.12
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
