@@ -1,3 +1,7 @@
+## [v0.12.0] — 2026-11-13
+
+- **BREAKING**：删除 hertztracer.ServerOption 历史类型别名（#247 改名 TracerOption 时冻结保留的兼容面，本次三 org 兼容清仓显式解除冻结承诺）。下游迁移：ServerOption → TracerOption（同型纯改名）。命名红线不变：函数选项禁止裸 Option（与 hertz 公共配置包 co-import 冲突的根因）。地板随迁 metrics v0.4.0 / pkg v0.48.0。
+
 ## [v0.11.6] — 2026-11-13
 
 - 17 单修复批：governance 四单（#233-#235/#223）、clientip 缓存快路径（#237）、BindPage Atoi（#236）、超时 defer cancel 移除（#235）、限流初始令牌（#234）、SSE data 行（#229）、裸 Option 改名（#247）、err 字面量收编（#231）等；地板对齐 pkg v0.47.0。
