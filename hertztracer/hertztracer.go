@@ -75,9 +75,6 @@ import (
 // 真实字段:tracer(OpenTracing tracer)与 span 名生成函数。
 type TracerOption func(*tracerConfig)
 
-// ServerOption 是 TracerOption 的历史别名(保留导出以兼容既有引用;勿删)。
-type ServerOption = TracerOption
-
 // tracerConfig 是本包选项的配置载体。
 type tracerConfig struct {
 	tracer            opentracing.Tracer
