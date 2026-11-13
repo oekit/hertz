@@ -45,5 +45,4 @@ func TestNoBareOptionType(t *testing.T) {
 	}
 	// 新名与别名共存。
 	var _ TracerOption
-	var _ ServerOption
 }

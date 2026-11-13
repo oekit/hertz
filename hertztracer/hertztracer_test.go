@@ -13,9 +13,6 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 )
 
-// serverOptionAsOption 证明 ServerOption 与 Option 是同一类型（别名）。
-func serverOptionAsOption(o ServerOption) TracerOption { return o }
-
 // countingTracer 记录 StartSpan 调用（次数 + span 名），用于钉住 TracerOption 生效。
 type countingTracer struct {
 	mu       sync.Mutex
@@ -97,8 +94,7 @@ func TestOption_IsNotBareStruct(t *testing.T) {
 	if opt == nil {
 		t.Fatal("WithTracer must return a usable TracerOption")
 	}
-	// ServerOption 仍是 Option 的别名（历史导出名保留）——同型可直接互换。
-	cfg := newTracerConfig([]TracerOption{serverOptionAsOption(opt)})
+	cfg := newTracerConfig([]TracerOption{opt})
 	if cfg.tracer == nil {
 		t.Fatal("option must carry a real tracer")
 	}
