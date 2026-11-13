@@ -14,7 +14,7 @@ require (
 	github.com/oekit/logx v0.11.0
 	github.com/oekit/metrics v0.4.0
 	github.com/oekit/middleware v0.18.1
-	github.com/oekit/nns v0.8.2
+	github.com/oekit/nns v0.9.0
 	github.com/oekit/pkg v0.48.0
 	github.com/oekit/registry v0.6.0
 	github.com/oekit/registry/nacos v0.2.0
