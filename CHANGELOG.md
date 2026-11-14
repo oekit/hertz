@@ -1,3 +1,7 @@
+## [v0.12.1] — 2026-11-14
+
+- chore(deps): 依赖地板追平——middleware v0.19.2(随 any 现代化版)
+
 ## [v0.12.0] — 2026-11-13
 
 - **BREAKING**：删除 hertztracer.ServerOption 历史类型别名（#247 改名 TracerOption 时冻结保留的兼容面，本次三 org 兼容清仓显式解除冻结承诺）。下游迁移：ServerOption → TracerOption（同型纯改名）。命名红线不变：函数选项禁止裸 Option（与 hertz 公共配置包 co-import 冲突的根因）。地板随迁 metrics v0.4.0 / pkg v0.48.0。
