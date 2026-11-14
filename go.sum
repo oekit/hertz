@@ -222,8 +222,8 @@ github.com/oekit/logx/hlog v0.1.12 h1:FbdQl38geSN5947yjHKe/pTLOb/2JPEVBuyrRhNl+Y
 github.com/oekit/logx/hlog v0.1.12/go.mod h1:NScuUKUUreRFtGCpXqI5WK8bpNrOF3ucIffVeI7PsWw=
 github.com/oekit/metrics v0.4.0 h1:14ERNlP8lmfA/oqiymCmGF5rMsqHaK6uTgGCKV8d/BI=
 github.com/oekit/metrics v0.4.0/go.mod h1:chIhRvpiXPKgyxuh+qXnT4EMw1QEEKrdon9TfQR8su0=
-github.com/oekit/middleware v0.19.1 h1:tYNMlncFMYjfaT36gFs8U+4kXH88HEh6fj58f+uG4mc=
-github.com/oekit/middleware v0.19.1/go.mod h1:nVhDuw1OpJdFkThkjdyeG4aUsSqznfszcfZyT0n4Yzg=
+github.com/oekit/middleware v0.19.2 h1:fd/7MwZQ2WsRtFrbxWam3uit0CAE+3+QOefNAE3MpZ8=
+github.com/oekit/middleware v0.19.2/go.mod h1:nVhDuw1OpJdFkThkjdyeG4aUsSqznfszcfZyT0n4Yzg=
 github.com/oekit/nns v0.9.0 h1:h9/TsLnrVJUKiSYOdFJARCaMqbHc0x3h8of6RhLD5mA=
 github.com/oekit/nns v0.9.0/go.mod h1:RNEy0N15bMuJLy4nI2KK+uVO7BB0iJMkhKKKYpzSaVk=
 github.com/oekit/pkg v0.48.0 h1:3j1j8ZyAxX7B4i41Gf0IEHHaTXjC+WAxEYXhW+ZkC+g=
