@@ -1,3 +1,12 @@
+## [v0.12.2] — 2026-11-15
+
+- hertztracer 配对判据与链路推进兜底（#288）：交权上游改为 TraceInfo 非 nil 且已配对安装（serverTracerCreated 置位判据），上游早退时 GetIndex 比对落回自建 span，混合装配不再截断链路
+- chainmw 尊重 c.Abort()（#289）：适配 handler Abort 后整条 chain 链（含 terminal）终止，状态保持
+- CSV render 类型注释与 struct 展开（#290）：注释改指真实入口 NewCSVFromAny，struct/*struct 行反射展开（导出字段逐列、指针 nil→空串、不自动加表头）
+- governance 构造期拒绝 nil Store（#291）：NewLimiterMiddleware/NewTimeoutMiddleware fail-fast panic，与 nns/registry/metrics 同口径
+
+关联问题单：hertz#288、hertz#289、hertz#290、hertz#291。
+
 ## [v0.12.1] — 2026-11-14
 
 - chore(deps): 依赖地板追平——middleware v0.19.2(随 any 现代化版)
