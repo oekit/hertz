@@ -34,8 +34,9 @@
 //
 // 需要回放/游标续传（Last-Event-ID 断线续传、回放窗口、心跳、慢消费者
 // 断流自愈）的 SSE 端点不必手写状态机：Responder 复用 github.com/oekit/pkg/sse
-// 的内核（Hub/ReplayFunc/「订阅先于回放」去重），做 Hertz 形态装配，直接
-// 挂路由即可（帧字节与 pkg/sse 一致）：
+// v0.51.0 起的导出内核（Hub/Source/ReplayFunc + ParseCursor/ReplaySince/Cursor
+// 游标与去重），做 Hertz 形态装配，直接挂路由即可（帧字节与 pkg/sse 一致，
+// 慢消费者缓冲满即断流、客户端带 Last-Event-ID 重连由回放补窗）：
 //
 //	hub := pkgsse.NewHub()
 //	resp := sse.NewResponder(hub, func(after uint64) []pkgsse.Event {

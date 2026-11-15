@@ -23,7 +23,7 @@ go get github.com/oekit/hertz@v0.12.2
 |---|---|---|
 | `hertz`（模块根包） | `github.com/oekit/hertz` | `RunServer` 生命周期、hlog→logx 桥接、Shutdown Hook |
 | `health` | `github.com/oekit/hertz/health` | K8s 探针（/ping、/health、/buildVersion）；`Degraded` 软依赖降级；`HealthResponse` 导出面（消费方直接解码 `data.status` / `data.checks`，不必手写信封结构体）；空路径跳过注册；Redis checker 在 `health/redischeck`（核心包零 go-redis） |
-| `sse` | `github.com/oekit/hertz/sse` | Server-Sent Events 封装（官方 protocol/sse + LastEventID 续传） |
+| `sse` | `github.com/oekit/hertz/sse` | Server-Sent Events 封装（官方 protocol/sse 流原语 + 复用 `oekit/pkg/sse` v0.51.0 游标/回放内核的 Hertz Responder：Last-Event-ID、回放去重、心跳、慢消费者断流） |
 | `metrics` | `github.com/oekit/hertz/metrics` | Prometheus /metrics 暴露（gzip/OpenMetrics 协商） |
 | `render` / `adaptor` | `github.com/oekit/hertz/render` 等 | 业务 Render 实现、net/http 互转；静态托管两档：`NativeStaticFSHandler`（纯静态，miss ⇒ 404）与 v0.10.0 起的 `NativeStaticSPAHandler`（SPA history 路由，miss ⇒ 回退入口文件 200）——四条回退判据（GET/HEAD、`WithSPASkipPrefix` 不回退、末段带扩展名不回退、路径合法）与 immutable/no-cache 双档缓存（入口缺省 no-cache：长缓存旧 index 会让发版后白屏）；回退文件缺失**构造期 panic**并列出 fsys 根条目 |
 | `crudh` / `validatorh` / `versionh` | `github.com/oekit/hertz/crudh` 等 | 泛型 CRUD Handler、参数绑定校验、版本端点 |
