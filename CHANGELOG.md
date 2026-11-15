@@ -1,3 +1,10 @@
+## [v0.12.4] — 2026-11-16
+
+- - hertz/sse 的游标/回放内核改为消费 oekit/pkg v0.51.0 导出面（`ParseCursor`/`ReplaySince`/`Cursor`）：删除本地 parseCursor 副本，「先订阅后回放」去重/非法游标 400/慢消费者断流语义与 net/http Responder 单源一致；新增掉队重连按游标续传用例（#302 follow-up）。
+- 依赖地板对齐：concurrency v0.38.0 / kitx v0.10.0（发版前置，无代码变更）。
+
+关联问题单：hertz#302。
+
 ## [v0.12.3] — 2026-11-15
 
 - fix: clientip.remoteAddr 对 unix socket 对端归一为 127.0.0.1（与缺省回环口径对齐，#297）；metrics 便捷入口新增 WithExtraGatherers 接入外部 Registry（promauto/DefaultGatherer 用户不再黑洞），unionGatherer 同名整族去重+每名 WARN 一次（#298）
