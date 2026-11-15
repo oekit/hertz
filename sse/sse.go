@@ -29,6 +29,20 @@
 //
 // 注意（官方约定）：Writer 的生命周期必须与 handler 一致，不要在 handler
 // 返回后异步后台写入。
+//
+// # 游标回放应答器（#302）
+//
+// 需要回放/游标续传（Last-Event-ID 断线续传、回放窗口、心跳、慢消费者
+// 断流自愈）的 SSE 端点不必手写状态机：Responder 复用 github.com/oekit/pkg/sse
+// 的内核（Hub/ReplayFunc/「订阅先于回放」去重），做 Hertz 形态装配，直接
+// 挂路由即可（帧字节与 pkg/sse 一致）：
+//
+//	hub := pkgsse.NewHub()
+//	resp := sse.NewResponder(hub, func(after uint64) []pkgsse.Event {
+//	    return db.EventsAfter(after) // 取数面：宿主 DB
+//	})
+//	h.GET("/stream", resp.Serve)
+//	// 事件落库成功后广播实时面：hub.Emit(pkgsse.Event{ID: next, Data: json})
 package sse
 
 import (
