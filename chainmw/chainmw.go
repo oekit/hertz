@@ -73,6 +73,12 @@ func Wrap(mws []chain.Middleware, terminal app.HandlerFunc, opts ...WrapOption) 
 
 // FromHertz 把 Hertz handler 适配为 chain.Middleware（混编用）：
 // resp 恒为 nil（Hertz handler 直接写响应缓冲），错误透传。
+//
+// 被适配 handler 的 c.Abort() 会终止**整条 chain 链**（含 terminal，#289）：
+// hertz 的 Abort 只置本包看不到的 hertz ctx.index、停的是 hertz 自己的
+// handlers 链，而 chain 的 next 是 core/chain 另一条链——不显式检查
+// IsAborted 时，mw.ErrorResp 这类「写完 401/403/500 即 Abort」的认证/限流
+// 短路在混编栈里会被绕过（下游照常执行并可能把拒绝响应覆写成 200）。
 func FromHertz(h app.HandlerFunc) chain.Middleware {
 	return func(next chain.Handler) chain.Handler {
 		return func(ctx context.Context, req any) (any, error) {
@@ -81,6 +87,9 @@ func FromHertz(h app.HandlerFunc) chain.Middleware {
 				return next(ctx, req)
 			}
 			h(ctx, c)
+			if c.IsAborted() {
+				return nil, nil
+			}
 			return next(ctx, req)
 		}
 	}
