@@ -4,27 +4,95 @@
 //
 //	metrics.Init("my-service")
 //	r.GET("/metrics", hmetrics.MetricsHandler())
+//
+// ⚠️ 便捷入口默认只暴露 oekit metrics.Registry；注册在
+// prometheus.DefaultRegisterer 上的 collector（promauto、第三方库自注册的
+// collector）默认不在抓取面上，也不会报错——只是在 /metrics 上静默缺席
+// （#298）。需要一并暴露时显式接入外部 Gatherer：
+//
+//	metrics.InitAndRegister("my-service", r,
+//	    metrics.WithExtraGatherers(prometheus.DefaultGatherer))
+//	// 或
+//	r.GET("/metrics", metrics.MetricsHandler(
+//	    metrics.WithExtraGatherers(prometheus.DefaultGatherer)))
 package metrics
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"sync"
 
+	"github.com/oekit/logx"
 	"github.com/oekit/metrics"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	dto "github.com/prometheus/client_model/go"
 )
+
+// metricsLog 是本包日志门面（懒解析；AGENTS.md：SDK/基础包必须 Delegating）。
+var metricsLog = logx.Delegating("hertz-metrics")
+
+// HandlerOption 配置 /metrics 便捷入口（MetricsHandler / InitAndRegister）。
+type HandlerOption func(*handlerConfig)
+
+// handlerConfig 是便捷入口的构造期配置。
+type handlerConfig struct {
+	extraGatherers []prometheus.Gatherer
+}
+
+// WithExtraGatherers 让便捷入口在 oekit metrics.Registry 之外额外聚合给定
+// Gatherer——典型用法是 prometheus.DefaultGatherer（promauto / 第三方库的
+// 默认注册面）：
+//
+//	metrics.InitAndRegister("svc", h,
+//	    metrics.WithExtraGatherers(prometheus.DefaultGatherer))
+//
+// 聚合语义（#298）：metrics.Registry 优先；额外 Gatherer 中与已出现 metric
+// family **同名**的 family 整族跳过，并经 logx 每个名字告警一次。两个
+// registry 天然会各带一份 go_* / process_*（client_golang 默认 registry
+// 自动注册，metrics.Init 也会注册），同名冲突若原样交给
+// prometheus.Gatherers，合并错误会让整个 /metrics 以 500 收场——去重后只剩
+// 一份（内容等价），抓取面保持可用。
+//
+// 需要完全自定义抓取面（不做同名去重）时用 MetricsHandlerFor。
+//
+// 传入 nil Gatherer 属构造期配置错误：直接 panic（fail-fast，与
+// MetricsHandlerFor(nil) 同口径），绝不让 nil 解引用推迟到每次抓取。
+func WithExtraGatherers(gatherers ...prometheus.Gatherer) HandlerOption {
+	return func(cfg *handlerConfig) {
+		for _, g := range gatherers {
+			if g == nil {
+				panic("hertz/metrics: WithExtraGatherers requires non-nil gatherer")
+			}
+			cfg.extraGatherers = append(cfg.extraGatherers, g)
+		}
+	}
+}
 
 // MetricsHandler 返回一个 Hertz HandlerFunc，用于暴露 /metrics 端点。
 // 它使用全局 metrics.Registry（由 metrics.Init 注册的 Go/Process/BuildInfo 指标），
 // 并将 Hertz RequestContext 适配为标准 http.ResponseWriter。
-func MetricsHandler() app.HandlerFunc {
-	return MetricsHandlerFor(metrics.Registry)
+//
+// ⚠️ 默认抓取面**只有** metrics.Registry：注册到
+// prometheus.DefaultRegisterer 的 collector（promauto 声明的 counter、
+// 第三方库自注册的 collector）在 /metrics 上静默不可见（#298）。需要合并
+// 时用 WithExtraGatherers：
+//
+//	MetricsHandler(WithExtraGatherers(prometheus.DefaultGatherer))
+func MetricsHandler(opts ...HandlerOption) app.HandlerFunc {
+	cfg := handlerConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if len(cfg.extraGatherers) == 0 {
+		return MetricsHandlerFor(metrics.Registry)
+	}
+	return MetricsHandlerFor(&unionGatherer{primary: metrics.Registry, extras: cfg.extraGatherers})
 }
 
 // MetricsHandlerFor 返回一个 Hertz HandlerFunc，使用指定的 Gatherer。
@@ -56,6 +124,65 @@ func MetricsHandlerFor(gatherer prometheus.Gatherer) app.HandlerFunc {
 		}
 		httpHandler.ServeHTTP(writer, req)
 	}
+}
+
+// unionGatherer 合并主/额外 Gatherer 的抓取面（#298）。
+//
+// 同名 metric family 按「主 Gatherer 优先」整族跳过额外副本，并按 family
+// 名各告警一次。典型冲突是 go_* / process_*：client_golang 的默认 registry
+// 与 metrics.Init 都会注册它们，family 名与标签完全相同；直接交给
+// prometheus.Gatherers 会触发 duplicate-metric 合并错误，让整个 /metrics
+// 以 500 收场（不是只丢冲突的那一族）。
+type unionGatherer struct {
+	primary prometheus.Gatherer
+	extras  []prometheus.Gatherer
+	// warned 记录已告警过的同名 family（每个名字只告警一次：抓取高频，
+	// 不能每次请求刷日志）。
+	warned sync.Map // string → struct{}
+}
+
+// Gather 实现 prometheus.Gatherer。主/额外 Gatherer 的错误都保留在返回的
+// MultiError 里（不吞错）；同名 family 去重本身不产生错误。
+func (g *unionGatherer) Gather() ([]*dto.MetricFamily, error) {
+	primary, err := g.primary.Gather()
+	var errs prometheus.MultiError
+	if err != nil {
+		errs = append(errs, err)
+	}
+	seen := make(map[string]struct{}, len(primary))
+	for _, mf := range primary {
+		seen[mf.GetName()] = struct{}{}
+	}
+	out := primary
+	for i, extra := range g.extras {
+		mfs, err := extra.Gather()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("hertz/metrics: extra gatherer #%d: %w", i+1, err))
+		}
+		for _, mf := range mfs {
+			if _, dup := seen[mf.GetName()]; dup {
+				g.warnDuplicate(mf.GetName())
+				continue
+			}
+			seen[mf.GetName()] = struct{}{}
+			out = append(out, mf)
+		}
+	}
+	return out, errs.MaybeUnwrap()
+}
+
+// warnDuplicate 对每个同名 family 只告警一次。
+func (g *unionGatherer) warnDuplicate(name string) {
+	if _, loaded := g.warned.LoadOrStore(name, struct{}{}); !loaded {
+		warnDuplicateMetricFamily(name)
+	}
+}
+
+// warnDuplicateMetricFamily 是同名 family 去重的告警出口。抽成变量便于单测
+// 断言（生产指向 logx；告警次数由 unionGatherer.warned 控制为每个名字一次）。
+var warnDuplicateMetricFamily = func(name string) {
+	metricsLog.Warn("hertz/metrics: metric family exists in both metrics.Registry and an extra gatherer - keeping the metrics.Registry copy and skipping the extra one; remove the duplicate registration if the extra copy has unique labels",
+		"metric_family", name)
 }
 
 // handlerCache 缓存 promhttp handler（按 Gatherer 维度）。
@@ -96,10 +223,15 @@ func promHandlerFor(gatherer prometheus.Gatherer) http.Handler {
 }
 
 // InitAndRegister 初始化 Prometheus 指标并注册 /metrics 端点。
-// 等价于 metrics.Init(serviceName) + h.GET("/metrics", MetricsHandler())。
-func InitAndRegister(serviceName string, h *server.Hertz) {
+// 等价于 metrics.Init(serviceName) + h.GET("/metrics", MetricsHandler(opts...))。
+//
+// 默认抓取面只含 metrics.Registry；promauto / 第三方 collector 注册在
+// prometheus.DefaultRegisterer 上，需显式接线（#298）：
+//
+//	InitAndRegister("svc", h, WithExtraGatherers(prometheus.DefaultGatherer))
+func InitAndRegister(serviceName string, h *server.Hertz, opts ...HandlerOption) {
 	metrics.Init(serviceName)
-	h.GET("/metrics", MetricsHandler())
+	h.GET("/metrics", MetricsHandler(opts...))
 }
 
 // hertzResponseWriter 将 Hertz RequestContext 适配为标准 http.ResponseWriter，
