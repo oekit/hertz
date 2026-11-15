@@ -12,11 +12,10 @@ import (
 )
 
 // 本文件是 pkg/sse 内核（Hub/Event/ReplayFunc/「订阅先于回放」去重）的 Hertz
-// 形态装配（#302）：实时面与取数面直接复用 github.com/oekit/pkg/sse（传输
-// 无关），本包只补 Hertz 侧的两处传输差异——游标读取与帧写出。游标解析、
-// 帧序列化、心跳与慢消费者自愈语义与 pkg/sse 逐条对齐（帧字节一致，见各处
-// 注记）；地板保持 pkg v0.50.0（其 sse 包未导出 parseCursor/frame，故此处
-// 有同口径的本地实现，升级若导出后可收敛）。
+// 形态装配（#302）：实时面、取数面与游标/回放/去重内核直接复用
+// github.com/oekit/pkg/sse（v0.51.0 起导出 ParseCursor/ReplaySince/Cursor），
+// 本包只补 Hertz 侧的两处传输差异——游标头读取与帧写出。帧序列化、心跳与
+// 慢消费者自愈语义与 pkg/sse 逐条对齐（帧字节一致，见各处注记）。
 //
 // 用法（端点接入 ≤10 行）：
 //
@@ -102,7 +101,9 @@ func NewResponder(src pkgsse.Source, replay pkgsse.ReplayFunc, opts ...Responder
 // 与 pkg/sse.Responder 的口径差异只有一处：Hertz 的流式 Writer 无「只冲头
 // 不带体」的 API，响应头随首帧（回放首帧或首个心跳）一并发出。
 func (r *Responder) Serve(ctx context.Context, c *app.RequestContext) {
-	cursor, ok := parseCursor(string(c.GetHeader("Last-Event-ID")))
+	// 游标判定与 pkg/sse.Responder 共用同一导出面 ParseCursor（非法游标
+	// fail-closed 400；缺省 0 = 全量回放）。
+	cursor, ok := pkgsse.ParseCursor(string(c.GetHeader("Last-Event-ID")))
 	if !ok {
 		c.String(consts.StatusBadRequest, "Last-Event-ID 必须是无符号整数\n")
 		return
@@ -125,15 +126,13 @@ func (r *Responder) Serve(ctx context.Context, c *app.RequestContext) {
 	frames, cancel := r.src.Subscribe()
 	defer cancel()
 
-	last := cursor
-	for _, e := range r.replay(last) {
-		if e.ID <= last {
-			continue // 回放窗口内的乱序/重叠帧跳过（宿主契约的防御性兜底）
-		}
+	// 回放/去重内核与 net/http Responder 共用 ReplaySince + Cursor：
+	// 防御性跳过窗口内乱序/越界帧，游标停在已回放最大 ID。
+	backlog, cur := pkgsse.ReplaySince(cursor, r.replay)
+	for _, e := range backlog {
 		if err := writeEvent(stream, e); err != nil {
 			return
 		}
-		last = e.ID
 	}
 
 	// 心跳注释帧：空闲保活，防中间层掐流（语义见 pkg/sse 包文档）。
@@ -152,13 +151,12 @@ func (r *Responder) Serve(ctx context.Context, c *app.RequestContext) {
 			if !ok {
 				return // Hub Close 或慢消费者掉队断流：客户端带游标重连补窗
 			}
-			if e.ID <= last {
+			if !cur.Accept(e) {
 				continue // 订阅/回放重叠去重：同 ID 只写一次
 			}
 			if err := writeEvent(stream, e); err != nil {
 				return
 			}
-			last = e.ID
 		}
 	}
 }
@@ -184,21 +182,6 @@ func writeHeartbeat(s *Stream, comment string) error {
 		return err
 	}
 	return s.Write(&Event{})
-}
-
-// parseCursor 解析 Last-Event-ID 游标：空 = 0（全量回放）；非合法无符号
-// 整数 = 非法（调用方按 400 拒绝）。与 pkg/sse 的 parseCursor 同口径（v0.50.0
-// 未导出，本地同实现；升级若导出后可直接换用）。
-func parseCursor(s string) (uint64, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, true
-	}
-	id, err := strconv.ParseUint(s, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return id, true
 }
 
 // validComment 心跳注释合法性：冒号开头、单行（SSE 注释帧形态约束）。

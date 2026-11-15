@@ -364,28 +364,54 @@ func TestResponder_LaggardDisconnect(t *testing.T) {
 	t.Fatalf("掉队者应被摘除，Subscribers = %d", hub.Subscribers())
 }
 
-// TestResponderCursorParsing 游标解析（与 pkg/sse parseCursor 同口径）：
-// 缺省 0 全量回放、空白容忍、非法拒绝。
-func TestResponderCursorParsing(t *testing.T) {
-	cases := []struct {
-		in   string
-		want uint64
-		ok   bool
-	}{
-		{"", 0, true},
-		{"  7 ", 7, true},
-		{"0", 0, true},
-		{"18446744073709551615", 18446744073709551615, true},
-		{"abc", 0, false},
-		{"-1", 0, false},
-		{"1.5", 0, false},
-		{"18446744073709551616", 0, false},
-	}
-	for _, c := range cases {
-		got, ok := parseCursor(c.in)
-		if ok != c.ok || (ok && got != c.want) {
-			t.Fatalf("parseCursor(%q) = (%d, %v)，应为 (%d, %v)", c.in, got, ok, c.want, c.ok)
+// TestResponder_LaggardReconnectResumesByCursor 掉队断流后的自愈闭环：客户端
+// 带最后收到的游标重连，ReplayFunc 补齐被丢弃的窗口（与 pkg/sse 包文档
+// 「慢消费者自愈」一致）。
+func TestResponder_LaggardReconnectResumesByCursor(t *testing.T) {
+	hub := pkgsse.NewHub(pkgsse.WithSubscriberBuffer(1))
+	replay := func(after uint64) []pkgsse.Event {
+		switch after {
+		case 0:
+			hub.Emit(pkgsse.Event{ID: 2, Data: "buffered"}) // 缓冲内
+			hub.Emit(pkgsse.Event{ID: 3, Data: "lagged"})   // 缓冲满 = 掉队：断流
+			return []pkgsse.Event{{ID: 1, Data: "replay"}}
+		case 2:
+			return []pkgsse.Event{{ID: 3, Data: "lagged"}} // 重连补窗
+		default:
+			return nil
 		}
+	}
+	addr, cleanup := startSSEServer(t, NewResponder(hub, replay, WithHeartbeat(time.Hour)).Serve)
+	defer cleanup()
+	defer func() { _ = hub.Close(context.Background()) }()
+
+	resp, cancel, br := connectH(t, addr, nil)
+	if got := readFrame(t, br); got != expectFrame(1, "", "replay") {
+		t.Fatalf("回放帧 = %q，应为 %q", got, expectFrame(1, "", "replay"))
+	}
+	if got := readFrame(t, br); got != expectFrame(2, "", "buffered") {
+		t.Fatalf("缓冲内帧 = %q，应为 %q", got, expectFrame(2, "", "buffered"))
+	}
+	if _, err := br.Peek(1); err != io.EOF {
+		t.Fatalf("掉队后流应关闭（io.EOF），got err = %v", err)
+	}
+	cancel()
+	_ = resp.Body.Close()
+
+	// 等掉队订阅从在订表摘除（defer cancel 已随 handler 返回执行）。
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.Subscribers() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	// 带最后收到的游标 2 重连：回放补齐被丢弃的 3。
+	resp2, cancel2, br2 := connectH(t, addr, http.Header{"Last-Event-ID": {"2"}})
+	defer func() {
+		cancel2()
+		_ = resp2.Body.Close()
+	}()
+	if got := readFrame(t, br2); got != expectFrame(3, "", "lagged") {
+		t.Fatalf("重连回放帧 = %q，应为 %q", got, expectFrame(3, "", "lagged"))
 	}
 }
 
