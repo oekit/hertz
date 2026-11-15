@@ -20,6 +20,7 @@ package clientip
 import (
 	"encoding/binary"
 	"hash/maphash"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -427,6 +428,17 @@ func cloneStrings(s []string) []string {
 
 // remoteAddr 取请求的对端地址（"ip:port" 形态）。
 // Hertz 的 RequestContext.RemoteAddr 保证非 nil（无连接时给零值地址）。
+//
+// unix 域套接字（unix / unixgram / unixpacket）的对端不是 IP：其
+// String() 是 socket 路径（本机匿名套接字常见为 "@"）。与 hertz 缺省
+// ClientIP 口径对齐（app.ClientIPWithOption 把 unix 对端视为回环），此处
+// 归一为 127.0.0.1——否则 socket 路径会被当成「不可解析的远端地址」原样
+// 返回给调用方，限流分桶/审计字段拿到 "@" 这类非 IP 值（#297）。
 func remoteAddr(c *app.RequestContext) string {
-	return c.RemoteAddr().String()
+	addr := c.RemoteAddr()
+	if strings.HasPrefix(addr.Network(), "unix") {
+		// unix、unixgram、unixpacket：本机套接字对端 == 回环（hertz 缺省语义）。
+		return "127.0.0.1"
+	}
+	return addr.String()
 }
