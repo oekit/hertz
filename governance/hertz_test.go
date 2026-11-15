@@ -3,6 +3,7 @@ package govhertz
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -647,4 +648,34 @@ func TestLimiterMiddleware_BurstInitialTokens(t *testing.T) {
 // itoa 是测试内的小工具：timeout_ms 数值拼进配置 JSON 用。
 func itoa(n int) string {
 	return strconv.Itoa(n)
+}
+
+// assertConstructPanic 断言构造函数在 nil store 上**构造期** panic 且文案
+// 指向对应函数名与 non-nil 要求(#291)。
+func assertConstructPanic(t *testing.T, name string, fn func()) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("%s(nil) must panic at construction time (#291)", name)
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, name) || !strings.Contains(msg, "non-nil") {
+			t.Errorf("panic value = %v, want message mentioning %s requires non-nil store", r, name)
+		}
+	}()
+	fn()
+}
+
+// TestNewLimiterMiddleware_NilStorePanics 钉住 #291:nil store 必须构造期
+// fail-fast(与 nns.NewInstanceWatcher / registry.NewRegistry 同口径)——
+// 此前零校验,解引用被推迟到首个请求:有 Recovery 时全站 500、无 Recovery
+// 时断连,panic 文本还是裸 nil pointer dereference,不指向「store 传错了」。
+func TestNewLimiterMiddleware_NilStorePanics(t *testing.T) {
+	assertConstructPanic(t, "NewLimiterMiddleware", func() { _ = NewLimiterMiddleware(nil) })
+}
+
+// TestNewTimeoutMiddleware_NilStorePanics 同 #291:超时中间件同口径。
+func TestNewTimeoutMiddleware_NilStorePanics(t *testing.T) {
+	assertConstructPanic(t, "NewTimeoutMiddleware", func() { _ = NewTimeoutMiddleware(nil) })
 }

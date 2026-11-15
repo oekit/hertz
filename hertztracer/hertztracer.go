@@ -48,6 +48,7 @@ package hertztracer
 import (
 	"bytes"
 	"context"
+	"sync/atomic"
 
 	"github.com/bytedance/gopkg/cloud/metainfo"
 	"github.com/cloudwego/hertz/pkg/app"
@@ -133,6 +134,31 @@ func defaultClientOperationName(req *protocol.Request) string {
 	return string(req.Method()) + " " + string(req.Path())
 }
 
+// serverTracerCreated 是包级「已配对安装」状态:本进程内是否经
+// [NewServerTracer] / [NewServerTracing] 创建过 contrib server tracer。
+//
+// 为什么不能拿 c.GetTraceInfo() != nil 判「engine 装了 contrib tracer」(#288):
+// hertz v0.10.6 initTrace 只要 engine 上挂了**任意** tracer.Tracer 就保留
+// enableTrace,ctxPool.New 据此给每个 RequestContext 预置 TraceInfo——
+// GetTraceInfo() 非 nil 的真实含义是「engine 有 tracer」,不保证是 contrib 的。
+// 混合装配(engine 挂 hertzotel/自研 tracer + h.Use(NewServerMiddleware()))下
+// 判据为真、contrib 的 traceContainer 却缺失:上游 ServerCtx 记录
+// "get tracer container failed" 后**不 c.Next**,整条 handler 链被截断成
+// 空响应、每请求一条 ERROR 日志。同仓 hertzotel 对同一判据的诊断见其
+// serverTracerCreated 注释(#168)。
+//
+// 局限(进程粒度而非 engine 粒度,与 hertzotel 同款):多 engine 进程里只要
+// 任意 engine 配过本包 tracer,另一台未配的 engine 上的混合装配仍会把请求
+// 交给上游——由 [NewServerMiddleware] 的「链路推进」兜底接回,代价是该形态下
+// 每请求一条上游 ERROR 日志。请求期无法逐 engine 验证:traceContainer 的
+// key 在上游包内未导出。
+var serverTracerCreated atomic.Bool
+
+// markServerTracerCreated 置位「已配对安装」状态。只由 NewServerTracer /
+// NewServerTracing 调用——NewServerMiddleware 不得置位(它不创建 engine 上的
+// tracer,置位会让判据恒真,退回 #288 的缺陷)。
+func markServerTracerCreated() { serverTracerCreated.Store(true) }
+
 // NewServerMiddleware 构造 hertz server Opentracing 中间件(h.Use 注册)。
 // 业务需先 opentracing.SetGlobalTracer(...) 初始化全局 tracer。
 //
@@ -143,17 +169,29 @@ func defaultClientOperationName(req *protocol.Request) string {
 //   - 中间件 + server tracer([NewServerTracing] / [NewServerTracer]):
 //     走上游 ServerCtx(span 由 engine 的 server tracer 驱动,与上游契约一致)。
 //
-// ⚠️ 上游 ServerCtx 在 engine 未装 tracer 时会记录
-// "get tracer container failed" 并**中断链路**(不 c.Next)——本实现改为自建
-// span,链路不中断;engine 装了 tracer 时仍走上游(engine 的 Finish 依赖上游
-// trace container 里的 span,必须由上游设置)。
+// 交权上游的判据(#288)是两条同时成立:engine 装了 tracer
+// (c.GetTraceInfo() 非 nil)**且**本进程经 [NewServerTracer]/[NewServerTracing]
+// 配对安装过 contrib server tracer(见 [serverTracerCreated])。此前只看
+// GetTraceInfo() != nil,混合装配下判据恒真而 traceContainer 缺失,上游
+// 记录 "get tracer container failed" 后不 c.Next,整条链路被截断。
+//
+// ⚠️ 即便判据为真,上游 ServerCtx 也并非一定 c.Next(判据是进程粒度:多
+// engine、Option 未装上本 engine、上游 Extract 失败都会早退)——本实现比对
+// 调用前后的 c.GetIndex():链路推进了就由上游收尾(engine 的 Finish 依赖
+// 上游 trace container 里的 span,必须由上游设置,本包不再自建避免双 span);
+// 没推进则落回自建 span 分支,保证「链路不中断」。
 func NewServerMiddleware(opts ...TracerOption) app.HandlerFunc {
 	cfg := newTracerConfig(opts)
 	upstream := hertzcontribtracer.ServerCtx()
 	return func(ctx context.Context, c *app.RequestContext) {
-		if c.GetTraceInfo() != nil {
+		if c.GetTraceInfo() != nil && serverTracerCreated.Load() {
+			idx := c.GetIndex()
 			upstream(ctx, c)
-			return
+			if c.GetIndex() > idx {
+				return // 上游已驱动链路(建 span + c.Next)
+			}
+			// 上游早退(拿不到 traceContainer / Extract 失败):不 c.Next 会
+			// 截断链路,落回自建 span 分支。
 		}
 		span, spanCtx := opentracing.StartSpanFromContextWithTracer(ctx, cfg.tracer, cfg.formOperationName(c))
 		defer span.Finish()
@@ -181,9 +219,13 @@ type ServerTracing struct {
 //
 // 前提:业务已 opentracing.SetGlobalTracer(...) 初始化全局 tracer
 // (或用 [WithTracer] 显式指定)。
+//
+// 本函数置位 [serverTracerCreated]([NewServerMiddleware] 交权上游的判据,
+// #288)——判据要求「server tracer 与中间件成对装配」,只 h.Use 中间件不置位。
 func NewServerTracing(opts ...TracerOption) ServerTracing {
 	cfg := newTracerConfig(opts)
 	tr := hertzcontribtracer.NewTracer(cfg.tracer, cfg.formOperationName)
+	markServerTracerCreated()
 	return ServerTracing{
 		Option:     server.WithTracer(tr),
 		Middleware: NewServerMiddleware(opts...),
@@ -262,6 +304,12 @@ func NewClientMiddleware(opts ...TracerOption) client.Middleware {
 //	)
 //	h := server.New(server.WithTracer(tracer))
 //	h.Use(hertztracer.NewServerMiddleware())
+//
+// 返回值传给 server.WithTracer 即置位 [serverTracerCreated](供
+// [NewServerMiddleware] 的交权判据使用,#288):经本函数或 [NewServerTracing]
+// 配对安装是上游 ServerCtx 生效的前提,绕过本包直接装上游 tracer 时判据
+// 识别不到,中间件会走自建 span 分支。
 func NewServerTracer(t opentracing.Tracer, formOpName func(c *app.RequestContext) string) hertztracing.Tracer {
+	markServerTracerCreated()
 	return hertzcontribtracer.NewTracer(t, formOpName)
 }

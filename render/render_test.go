@@ -266,3 +266,52 @@ func TestJSONRPC_VoidResultNull(t *testing.T) {
 		t.Errorf("Error = %v, want absent for success", env.Error)
 	}
 }
+
+// TestNewCSVFromAny_StructRows 钉住 #290:struct 行按导出字段逐列展开成
+// 表格——此前 default 分支把整行 `%v` dump 进一个单元格,产出的是一列 Go
+// 结构体文本而非表格;未导出字段跳过;不自动加表头(行数与入参一致)。
+func TestNewCSVFromAny_StructRows(t *testing.T) {
+	type row struct {
+		Name   string
+		Age    int
+		Active bool
+		secret string // 未导出:必须跳过
+	}
+	c := NewCSVFromAny([]any{
+		row{Name: "alice", Age: 30, Active: true, secret: "x"},
+		row{Name: "bob", Age: 25},
+	})
+	if len(c.Rows) != 2 {
+		t.Fatalf("got %d rows, want 2 (struct rows must not invent a header)", len(c.Rows))
+	}
+	if got, want := strings.Join(c.Rows[0], ","), "alice,30,true"; got != want {
+		t.Errorf("row 0 = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(c.Rows[1], ","), "bob,25,false"; got != want {
+		t.Errorf("row 1 = %q, want %q", got, want)
+	}
+}
+
+// TestNewCSVFromAny_PointerStructRows 钉住指针行与可空指针字段(gorm 的
+// *string/*int 列常态):非 nil 解引用成值,nil 按空串——直接 %v 会打成
+// 指针地址(0xc000...)。
+func TestNewCSVFromAny_PointerStructRows(t *testing.T) {
+	type row struct {
+		Name string
+		Nick *string
+	}
+	nick := "n"
+	c := NewCSVFromAny([]any{
+		&row{Name: "alice", Nick: &nick},
+		&row{Name: "bob"},
+	})
+	if len(c.Rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(c.Rows))
+	}
+	if got, want := strings.Join(c.Rows[0], ","), "alice,n"; got != want {
+		t.Errorf("row 0 = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(c.Rows[1], ","), "bob,"; got != want {
+		t.Errorf("row 1 = %q, want %q (nil pointer field must be empty)", got, want)
+	}
+}
