@@ -105,12 +105,20 @@ func applySnapshot(b *bucket, pol governance.LimiterPolicy, gen int64) {
 // 从 Store 取 LimiterPolicy,超限返 429。策略变化按配置代际单向原地生效
 // (旧快照不回退、不清桶态,见 [applySnapshot])。
 //
+// store 必须非 nil:构造期 fail-fast(#291,与 nns.NewInstanceWatcher /
+// registry.NewRegistry 同口径)——nil 会把解引用推迟到首个请求才 panic
+// (裸 "nil pointer dereference",不指向「store 传错了」,且故障面从启动期
+// 挪到请求期)。
+//
 // 路径取**路由模板**(见 [routePath])。
 //
 // 桶按**命中的配置键**分片(而非原始请求路径):精确策略 "POST:/order" 仍按
 // path 独立计数;前缀/全局策略下同组 path 共享一个桶(高基数 path 不会撑爆
 // 桶表,且聚合容量与配置语义一致)。
 func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
+	if store == nil {
+		panic("hertz/governance: NewLimiterMiddleware requires non-nil governance.Store")
+	}
 	var buckets sync.Map // 命中的配置键 → *bucket
 	return func(ctx context.Context, c *app.RequestContext) {
 		// LoadVersion 一次拿到一致的(配置, 代际)对:代际要与快照同源,
@@ -160,7 +168,14 @@ func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 // 定时器存活至 deadline(有界:QPS × 超时值;hertz 的请求 ctx 源自每连接
 // ctx、请求完成从不取消,没有可挂靠的「响应写完」钩子,提前释放与异步
 // 正确性不可兼得——同步 handler 的提前释放正是本缺陷)。
+//
+// store 必须非 nil:构造期 fail-fast(#291,与 [NewLimiterMiddleware] 同
+// 口径)——nil 会把解引用推迟到首个请求才 panic(裸 "nil pointer
+// dereference",不指向「store 传错了」,且故障面从启动期挪到请求期)。
 func NewTimeoutMiddleware(store *governance.Store) app.HandlerFunc {
+	if store == nil {
+		panic("hertz/governance: NewTimeoutMiddleware requires non-nil governance.Store")
+	}
 	return func(ctx context.Context, c *app.RequestContext) {
 		if ms, ok := lookupTimeoutKey(store.Load().TimeoutMs, string(c.Method()), routePath(c)); ok && ms > 0 {
 			d := time.Duration(ms) * time.Millisecond
