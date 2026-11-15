@@ -1,3 +1,9 @@
+## [v0.12.3] — 2026-11-15
+
+- fix: clientip.remoteAddr 对 unix socket 对端归一为 127.0.0.1（与缺省回环口径对齐，#297）；metrics 便捷入口新增 WithExtraGatherers 接入外部 Registry（promauto/DefaultGatherer 用户不再黑洞），unionGatherer 同名整族去重+每名 WARN 一次（#298）
+
+关联问题单：hertz#297、hertz#298。
+
 ## [v0.12.2] — 2026-11-15
 
 - hertztracer 配对判据与链路推进兜底（#288）：交权上游改为 TraceInfo 非 nil 且已配对安装（serverTracerCreated 置位判据），上游早退时 GetIndex 比对落回自建 span，混合装配不再截断链路
