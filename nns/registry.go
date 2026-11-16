@@ -2,10 +2,10 @@ package nns
 
 import (
 	"context"
-	"fmt"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	nnsclient "github.com/oekit/nns/client"
+	"github.com/oekit/pkg/errors"
 	ereg "github.com/oekit/registry"
 	"github.com/oekit/registry/sdbridge"
 )
@@ -128,11 +128,11 @@ func (r *Registry) DeregisterContext(ctx context.Context, info *hregistry.Info) 
 // 兜底参数（defaultWeight）兜底（委托 sdbridge.ToInstance）。
 func buildInstance(info *hregistry.Info, weight int) (ereg.Instance, error) {
 	if info == nil {
-		return ereg.Instance{}, fmt.Errorf("nns-hertz registry: info is nil")
+		return ereg.Instance{}, errors.New("nns-hertz registry: info is nil")
 	}
 	inst, err := sdbridge.ToInstance(info.ServiceName, info.Addr, info.Weight, weight, info.Tags)
 	if err != nil {
-		return ereg.Instance{}, fmt.Errorf("nns-hertz registry: %w", err)
+		return ereg.Instance{}, errors.Wrapf(err, "nns-hertz registry")
 	}
 	return inst, nil
 }
@@ -152,7 +152,7 @@ func (r *Registry) applyRegistrar(degradedMsg string, apply func(reg ereg.Regist
 		if r.client.MockMode() {
 			return nil // mock 模式：静默跳过
 		}
-		return fmt.Errorf("nns-hertz registry: %s", degradedMsg)
+		return errors.Newf("nns-hertz registry: %s", degradedMsg)
 	}
 	return apply(reg)
 }

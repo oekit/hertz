@@ -2,9 +2,9 @@ package registry
 
 import (
 	"context"
-	"fmt"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
+	"github.com/oekit/pkg/errors"
 	ereg "github.com/oekit/registry"
 	"github.com/oekit/registry/sdbridge"
 )
@@ -53,10 +53,10 @@ func NewRegistry(reg ereg.Registrar, opts ...RegistryOption) hregistry.Registry 
 func (r *hertzRegistry) Register(info *hregistry.Info) error {
 	inst, err := toInstance(info, r.defaultWeight)
 	if err != nil {
-		return fmt.Errorf("hertz registry: register: %w", err)
+		return errors.Wrapf(err, "hertz registry: register")
 	}
 	if err := r.reg.Register(context.Background(), inst); err != nil {
-		return fmt.Errorf("hertz registry: register %s: %w", info.ServiceName, err)
+		return errors.Wrapf(err, "hertz registry: register %s", info.ServiceName)
 	}
 	return nil
 }
@@ -65,10 +65,10 @@ func (r *hertzRegistry) Register(info *hregistry.Info) error {
 func (r *hertzRegistry) Deregister(info *hregistry.Info) error {
 	inst, err := toInstance(info, r.defaultWeight)
 	if err != nil {
-		return fmt.Errorf("hertz registry: deregister: %w", err)
+		return errors.Wrapf(err, "hertz registry: deregister")
 	}
 	if err := r.reg.Deregister(context.Background(), inst); err != nil {
-		return fmt.Errorf("hertz registry: deregister %s: %w", info.ServiceName, err)
+		return errors.Wrapf(err, "hertz registry: deregister %s", info.ServiceName)
 	}
 	return nil
 }
@@ -77,7 +77,7 @@ func (r *hertzRegistry) Deregister(info *hregistry.Info) error {
 // （weight <= 0 时使用 defaultWeight 兜底，委托 [sdbridge.ToInstance]）。
 func toInstance(info *hregistry.Info, defaultWeight int) (ereg.Instance, error) {
 	if info == nil {
-		return ereg.Instance{}, fmt.Errorf("info is nil")
+		return ereg.Instance{}, errors.New("info is nil")
 	}
 	return sdbridge.ToInstance(info.ServiceName, info.Addr, info.Weight, defaultWeight, info.Tags)
 }

@@ -17,10 +17,10 @@ package render
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/cloudwego/hertz/pkg/app/server/render"
 	"github.com/cloudwego/hertz/pkg/protocol"
+	"github.com/oekit/pkg/errors"
 )
 
 // jsonRPCContentType 是 JSON-RPC 2.0 over HTTP 的标准 Content-Type。
@@ -90,13 +90,13 @@ func (r JSONRPC) Render(resp *protocol.Response) error {
 		// void/nil Result 也编码为字面 null，保证成功响应始终有 result 字段。
 		raw, err := json.Marshal(r.Result)
 		if err != nil {
-			return fmt.Errorf("hertzrender: JSONRPC marshal: %w", err)
+			return errors.Wrapf(err, "hertzrender: JSONRPC marshal")
 		}
 		env.Result = raw
 	}
 	body, err := json.Marshal(env)
 	if err != nil {
-		return fmt.Errorf("hertzrender: JSONRPC marshal: %w", err)
+		return errors.Wrapf(err, "hertzrender: JSONRPC marshal")
 	}
 	resp.AppendBody(body)
 	return nil

@@ -19,13 +19,13 @@ package metrics
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"reflect"
 	"sync"
 
 	"github.com/oekit/logx"
 	"github.com/oekit/metrics"
+	"github.com/oekit/pkg/errors"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -157,7 +157,7 @@ func (g *unionGatherer) Gather() ([]*dto.MetricFamily, error) {
 	for i, extra := range g.extras {
 		mfs, err := extra.Gather()
 		if err != nil {
-			errs = append(errs, fmt.Errorf("hertz/metrics: extra gatherer #%d: %w", i+1, err))
+			errs = append(errs, errors.Wrapf(err, "hertz/metrics: extra gatherer #%d", i+1))
 		}
 		for _, mf := range mfs {
 			if _, dup := seen[mf.GetName()]; dup {

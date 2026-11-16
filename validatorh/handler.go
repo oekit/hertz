@@ -23,6 +23,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/utils"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/oekit/kitx/validator"
+	"github.com/oekit/pkg/errors"
 )
 
 // BindQuery 只绑定 query 参数（query tag）并验证——不吸收 path/header/body。
@@ -48,7 +49,7 @@ func BindQuery(c *app.RequestContext, obj any) error {
 // hertz 中为 -1）同样携带 body，按长度判断会漏防。
 func BindJSON(c *app.RequestContext, obj any) error {
 	if len(c.Request.Body()) > 0 && !isJSONContentType(c) {
-		return wrapBindError("json", fmt.Errorf(
+		return wrapBindError("json", errors.Newf(
 			"request body 需 Content-Type: application/json（得到 %q）", string(c.ContentType())))
 	}
 	if err := c.BindJSON(obj); err != nil {

@@ -76,7 +76,6 @@ package health
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -88,6 +87,7 @@ import (
 	"github.com/oekit/concurrency/async"
 	"github.com/oekit/hertz/versionh"
 	"github.com/oekit/logx"
+	"github.com/oekit/pkg/errors"
 	"github.com/oekit/tracing/traceid"
 )
 
@@ -357,7 +357,7 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 				err := func() (err error) {
 					defer func() {
 						if r := recover(); r != nil {
-							err = fmt.Errorf("checker panic: %v", r)
+							err = errors.Newf("checker panic: %v", r)
 						}
 					}()
 					return checker.check(checkerCtx)
