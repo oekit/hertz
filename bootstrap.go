@@ -2,7 +2,6 @@ package hertz
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"runtime/debug"
 	"time"
@@ -284,7 +283,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 				return errProbeAborted
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("ready probe timeout after %s: server not running and no dial target", timeout)
+				return errors.Newf("ready probe timeout after %s: server not running and no dial target", timeout)
 			}
 			select {
 			case <-ctx.Done():
@@ -303,7 +302,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 				return errProbeAborted
 			}
 			if time.Now().After(deadline) {
-				return fmt.Errorf("ready probe timeout after %s, addr=%s: server not running", timeout, addr)
+				return errors.Newf("ready probe timeout after %s, addr=%s: server not running", timeout, addr)
 			}
 			select {
 			case <-ctx.Done():
@@ -317,7 +316,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 		if err == nil {
 			_ = conn.Close()
 			if !h.IsRunning() {
-				return fmt.Errorf("ready probe connected but server is not running, addr=%s", addr)
+				return errors.Newf("ready probe connected but server is not running, addr=%s", addr)
 			}
 			bootstrapLog.Info("hertz ready probe passed", "name", name, "addr", addr)
 			return callOnReady(name, cfg.onReady, app.Context())
@@ -327,7 +326,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 			return errProbeAborted
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("ready probe timeout after %s, addr=%s: %w", timeout, addr, err)
+			return errors.Wrapf(err, "ready probe timeout after %s, addr=%s", timeout, addr)
 		}
 		select {
 		case <-ctx.Done():
@@ -352,7 +351,7 @@ func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *serve
 func callOnReady(name string, fn func(ctx context.Context), ctx context.Context) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("hertz %s onReady panicked: %v", name, r)
+			err = errors.Newf("hertz %s onReady panicked: %v", name, r)
 		}
 	}()
 	fn(ctx)

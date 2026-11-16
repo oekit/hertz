@@ -1,10 +1,9 @@
 package render
 
 import (
-	"fmt"
-
 	"github.com/cloudwego/hertz/pkg/app/server/render"
 	"github.com/cloudwego/hertz/pkg/protocol"
+	"github.com/oekit/pkg/errors"
 	"github.com/vmihailenco/msgpack/v5"
 )
 
@@ -31,7 +30,7 @@ func (r MessagePack) Render(resp *protocol.Response) error {
 	r.WriteContentType(resp)
 	body, err := msgpack.Marshal(r.Data)
 	if err != nil {
-		return fmt.Errorf("hertzrender: MessagePack marshal: %w", err)
+		return errors.Wrapf(err, "hertzrender: MessagePack marshal")
 	}
 	resp.AppendBody(body)
 	return nil

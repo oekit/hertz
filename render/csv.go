@@ -9,6 +9,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app/server/render"
 	"github.com/cloudwego/hertz/pkg/protocol"
+	"github.com/oekit/pkg/errors"
 )
 
 // csvContentType 是 RFC 4180 推荐的 CSV Content-Type。
@@ -43,11 +44,11 @@ func (r CSV) Render(resp *protocol.Response) error {
 	var buf bytes.Buffer
 	w := csv.NewWriter(&buf)
 	if err := w.WriteAll(r.Rows); err != nil {
-		return fmt.Errorf("hertzrender: CSV write: %w", err)
+		return errors.Wrapf(err, "hertzrender: CSV write")
 	}
 	w.Flush()
 	if err := w.Error(); err != nil {
-		return fmt.Errorf("hertzrender: CSV flush: %w", err)
+		return errors.Wrapf(err, "hertzrender: CSV flush")
 	}
 	resp.AppendBody(buf.Bytes())
 	return nil
