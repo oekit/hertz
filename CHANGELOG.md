@@ -1,3 +1,7 @@
+## [v0.12.5] — 2026-11-16
+
+- refactor: fmt.Errorf → oekit/pkg/errors 三形态对位替换（#520 替换波）+ 依赖地板抬至最新已发布
+
 ## [v0.12.4] — 2026-11-16
 
 - - hertz/sse 的游标/回放内核改为消费 oekit/pkg v0.51.0 导出面（`ParseCursor`/`ReplaySince`/`Cursor`）：删除本地 parseCursor 副本，「先订阅后回放」去重/非法游标 400/慢消费者断流语义与 net/http Responder 单源一致；新增掉队重连按游标续传用例（#302 follow-up）。
