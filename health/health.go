@@ -114,25 +114,15 @@ type CheckResult struct {
 // CheckResult.Status = StatusDegraded、Error 填充，供告警系统识别。
 // 与硬失败（Status = StatusError → HTTP 503）区分：软依赖（缓存、旁路服务等）
 // 不可用应保持可见，但不应让就绪探针失败导致实例被摘流。
-type DegradedError struct {
-	// Err 是导致降级的底层错误，经 Unwrap 暴露，可被 errors.Is/As 链识别。
-	Err error
-}
+//
+// 本类型是 pkg/errors.DegradedError 的类型别名（#533 单源收敛）：
+// 实现单源于 pkg/errors/degraded.go（语义逐字对齐，pkg 侧实现即从本包
+// 这份收敛过去），Error() 的 nil-Err 回退 "degraded"、Unwrap 透传
+// errors.Is/As 链等行为不变；类型别名保证 errors.As(*DegradedError)
+// 判定与既有代码完全兼容，消费方代码无需改动。
+type DegradedError = errors.DegradedError
 
-// Error 实现 error 接口。
-func (e *DegradedError) Error() string {
-	if e.Err == nil {
-		return "degraded"
-	}
-	return e.Err.Error()
-}
-
-// Unwrap 返回底层错误，支持 errors.Is/As 链式判定。
-func (e *DegradedError) Unwrap() error {
-	return e.Err
-}
-
-// Degraded 将错误标记为软依赖降级。
+// Degraded 将错误标记为软依赖降级（薄委托 pkg/errors.Degraded）。
 // 在 Checker 中返回 health.Degraded(err)，/health 仍 200，
 // 该项 CheckResult.Status = StatusDegraded（data.status = StatusDegraded 供告警）。
 //
@@ -145,7 +135,7 @@ func (e *DegradedError) Unwrap() error {
 //	    return nil
 //	}))
 func Degraded(err error) error {
-	return &DegradedError{Err: err}
+	return errors.Degraded(err)
 }
 
 // Checker 带名称的健康检查器。
