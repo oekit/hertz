@@ -2,12 +2,22 @@ package registry
 
 import (
 	"context"
+	"time"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	"github.com/oekit/pkg/errors"
 	ereg "github.com/oekit/registry"
 	"github.com/oekit/registry/sdbridge"
 )
+
+// defaultRegisterTimeout 是 Register/Deregister 的缺省单次预算（#317，
+// kitex/kitex #191 的 hertz 孪生）：hregistry.Registry 接口无 ctx，框架在
+// engine.Spin 时自动 Register、优雅关停时 Deregister——裸
+// context.Background() 则底层 Registrar 拿到的 ctx 永无截止时间，注册中心
+// 不可达时（反）注册退化为 SDK 内部阻塞时长，拖住整个优雅关停序列。
+// 缺省 3s，应显著小于 bootstrap 关停 closer 的预算（defaultTimeout），
+// 给错误处理与后续 closer 留出余量。
+const defaultRegisterTimeout = 3 * time.Second
 
 // hertzRegistry 将 ekit [ereg.Registrar] 适配为 Hertz [hregistry.Registry]。
 type hertzRegistry struct {
@@ -55,7 +65,11 @@ func (r *hertzRegistry) Register(info *hregistry.Info) error {
 	if err != nil {
 		return errors.Wrapf(err, "hertz registry: register")
 	}
-	if err := r.reg.Register(context.Background(), inst); err != nil {
+	// 单次预算（#317，kitex #191 的 hertz 孪生）：接口无 ctx，这里以
+	// WithTimeout(Background) 补上，底层 Registrar 的取消/超时语义自此生效。
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRegisterTimeout)
+	defer cancel()
+	if err := r.reg.Register(ctx, inst); err != nil {
 		return errors.Wrapf(err, "hertz registry: register %s", info.ServiceName)
 	}
 	return nil
@@ -67,7 +81,11 @@ func (r *hertzRegistry) Deregister(info *hregistry.Info) error {
 	if err != nil {
 		return errors.Wrapf(err, "hertz registry: deregister")
 	}
-	if err := r.reg.Deregister(context.Background(), inst); err != nil {
+	// 单次预算（#317）：server 优雅关停路径的 Deregister 不再有无限预算，
+	// 注册中心不可达时最多阻塞 defaultRegisterTimeout。
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRegisterTimeout)
+	defer cancel()
+	if err := r.reg.Deregister(ctx, inst); err != nil {
 		return errors.Wrapf(err, "hertz registry: deregister %s", info.ServiceName)
 	}
 	return nil
