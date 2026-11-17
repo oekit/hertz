@@ -163,6 +163,21 @@ func (n *Checker) check(ctx context.Context) error {
 	return n.checker(ctx)
 }
 
+// safeCheck 调 [Checker.check] 并捕获 panic（健康检查不应让探针 goroutine
+// 崩溃，checker panic 跳过结果投递会让 handler 的 <-ch 永久阻塞）。
+// panic 值经 pkg/errors.Recovered 收编（#182 单源，对齐 bootstrap/healthz
+// 的 safeRun 孪生）：check 以 panic(err) 失败时错误身份不丢（errors.Is/As
+// 可穿透到原始 error），栈与类型信息恒在场；文案由 PanicError 的
+// "panic: <类型>: <值>" 提供。无 panic 时零包装开销。
+func safeCheck(c *Checker, ctx context.Context) (err error) {
+	defer func() {
+		if perr := errors.Recovered(recover()); perr != nil {
+			err = perr
+		}
+	}()
+	return c.check(ctx)
+}
+
 // Options 配置选项
 type Options struct {
 	PingPath      string
@@ -351,17 +366,10 @@ func NewHealthHandler(opts ...HealthOption) app.HandlerFunc {
 				// 父 ctx 取消时 checkerCtx 只携带 Canceled，原始 err 文案保留。
 				checkerCtx, cancelChecker := context.WithCancel(runCtx)
 				defer cancelChecker()
-				// checker panic 就地收编为 error 结果：checkTimeout<=0 路径
-				// 依赖"每个 checker 恰好投递一次"，panic 跳过投递会让
-				// 下面的 <-ch 永久阻塞（/health 挂死）。
-				err := func() (err error) {
-					defer func() {
-						if r := recover(); r != nil {
-							err = errors.Newf("checker panic: %v", r)
-						}
-					}()
-					return checker.check(checkerCtx)
-				}()
+				// checker panic 就地收编为 error 结果（safeCheck，#182 单源）：
+				// checkTimeout<=0 路径依赖"每个 checker 恰好投递一次"，panic
+				// 跳过投递会让下面的 <-ch 永久阻塞（/health 挂死）。
+				err := safeCheck(checker, checkerCtx)
 				timedOut := checkerCtx.Err() == context.DeadlineExceeded
 				status, errText := checkResultStatus(err, timedOut, verbose)
 				res.Status, res.Error = status, errText

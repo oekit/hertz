@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
@@ -253,5 +254,55 @@ func TestToInstance(t *testing.T) {
 				t.Errorf("Weight = %f, want %f", inst.Weight, tt.wantWeight)
 			}
 		})
+	}
+}
+
+// ctxCapturingRegistrar 捕获 Register/Deregister 收到的 ctx——用于钉 #317：
+// 接口层补的 WithTimeout(Background) 预算必须真正传到底层 Registrar。
+type ctxCapturingRegistrar struct {
+	regCtx     context.Context
+	deregCtx   context.Context
+	regCalls   int
+	deregCalls int
+}
+
+func (c *ctxCapturingRegistrar) Register(ctx context.Context, _ ereg.Instance) error {
+	c.regCalls++
+	c.regCtx = ctx
+	return nil
+}
+
+func (c *ctxCapturingRegistrar) Deregister(ctx context.Context, _ ereg.Instance) error {
+	c.deregCalls++
+	c.deregCtx = ctx
+	return nil
+}
+
+// TestRegistry_Register_TimeoutBudget 钉 #317（kitex/kitex #191 的 hertz 孪生）：
+// Register/Deregister 的 ctx 带缺省 3s 预算（defaultRegisterTimeout），不再是
+// 无截止的 Background——注册中心不可达时最多阻塞预算时长，不拖死优雅关停。
+func TestRegistry_Register_TimeoutBudget(t *testing.T) {
+	creg := &ctxCapturingRegistrar{}
+	r := NewRegistry(creg)
+
+	info := &hregistry.Info{ServiceName: "budget-svc", Addr: &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080}}
+	if err := r.Register(info); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if err := r.Deregister(info); err != nil {
+		t.Fatalf("Deregister() error = %v", err)
+	}
+
+	if creg.regCtx == nil {
+		t.Fatal("Register must reach the registrar with a ctx")
+	}
+	if dl, ok := creg.regCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
+		t.Errorf("Register ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
+	}
+	if creg.deregCtx == nil {
+		t.Fatal("Deregister must reach the registrar with a ctx")
+	}
+	if dl, ok := creg.deregCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
+		t.Errorf("Deregister ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
 	}
 }

@@ -13,6 +13,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 
+	pkgerrors "github.com/oekit/pkg/errors"
+
 	"github.com/oekit/hertz/versionh"
 	"github.com/oekit/tracing/traceid"
 )
@@ -374,6 +376,36 @@ func TestNewHealthHandler_CheckerPanic_ErrorResult(t *testing.T) {
 	e := mustUnmarshalEnvelope(t, c.Response.Body())
 	if !strings.Contains(string(e.Data), "panicky") {
 		t.Errorf("results should mention panicking checker, got %s", string(e.Data))
+	}
+}
+
+// TestSafeCheck_PanicErrorIdentity #316 回归：checker panic(哨兵 error) 经
+// pkg/errors.Recovered 收编后错误身份不丢——errors.Is 可穿透 PanicError
+// 判定原始错误，栈与类型信息在场（#182 单源，对齐 bootstrap/healthz 的
+// safeRun 孪生）。此前 errors.Newf("checker panic: %v", r) 把 panic 值拍平
+// 成纯文本，errors.Is 永远 miss。
+func TestSafeCheck_PanicErrorIdentity(t *testing.T) {
+	sentinel := errors.New("db connection lost")
+	panicky := NamedChecker("panicky-db", func(ctx context.Context) error {
+		panic(sentinel)
+	})
+
+	err := safeCheck(panicky, context.Background())
+	if err == nil {
+		t.Fatal("safeCheck 应把 panic 收编为非 nil error")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("errors.Is(err, sentinel) = false, want true（panic 哨兵 error 身份应保留），err = %v", err)
+	}
+	var perr *pkgerrors.PanicError
+	if !errors.As(err, &perr) {
+		t.Fatalf("errors.As(*PanicError) = false, want true, err type = %T", err)
+	}
+	if len(perr.Stack) == 0 {
+		t.Error("PanicError.Stack 应携带 panic 现场栈")
+	}
+	if !strings.Contains(err.Error(), "db connection lost") {
+		t.Errorf("Error() 文案应包含 panic 值本身, got %q", err.Error())
 	}
 }
 
