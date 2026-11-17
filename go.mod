@@ -7,16 +7,16 @@ require (
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
 	github.com/oekit/bootstrap v0.7.13
-	github.com/oekit/concurrency v0.38.1
-	github.com/oekit/core v0.15.4
-	github.com/oekit/gormx v0.12.2
-	github.com/oekit/kitx v0.10.1
-	github.com/oekit/logx v0.11.0
-	github.com/oekit/metrics v0.4.1
-	github.com/oekit/middleware v0.20.0
+	github.com/oekit/concurrency v0.39.0
+	github.com/oekit/core v0.16.0
+	github.com/oekit/gormx v0.13.0
+	github.com/oekit/kitx v0.11.0
+	github.com/oekit/logx v0.12.0
+	github.com/oekit/metrics v0.4.2
+	github.com/oekit/middleware v0.20.1
 	github.com/oekit/nns v0.9.2
 	github.com/oekit/pkg v0.53.0
-	github.com/oekit/registry v0.6.2
+	github.com/oekit/registry v0.7.0
 	github.com/oekit/registry/nacos v0.2.0
 	github.com/oekit/tracing v0.4.7
 	github.com/opentracing/opentracing-go v1.2.0
