@@ -1,3 +1,9 @@
+## [v0.12.6] — 2026-11-18
+
+- health checker panic 走 pkg/errors.Recovered 收编(#182 口径,#316);registry/nns adapter Register/Deregister 补 3s 超时预算,注册中心不可达不再无界阻塞/拖死优雅关停(kitex#191/#212 孪生,#317);InstancesToHertz weight<=0 回填 DefaultWeight(kitex#92 孪生,#318);health DegradedError 收敛 pkg/errors 单源(pkg v0.53.0)
+
+关联问题单：hertz#316、hertz#317、hertz#318。
+
 ## [v0.12.5] — 2026-11-16
 
 - refactor: fmt.Errorf → oekit/pkg/errors 三形态对位替换（#520 替换波）+ 依赖地板抬至最新已发布
