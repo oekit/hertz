@@ -16,7 +16,7 @@ require (
 	github.com/oekit/middleware v0.20.1
 	github.com/oekit/nns v0.9.3
 	github.com/oekit/pkg v0.54.0
-	github.com/oekit/registry v0.7.0
+	github.com/oekit/registry v0.8.0
 	github.com/oekit/registry/nacos v0.2.0
 	github.com/oekit/tracing v0.4.8
 	github.com/opentracing/opentracing-go v1.2.0
