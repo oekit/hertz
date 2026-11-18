@@ -1,3 +1,7 @@
+## [v0.12.8] — 2026-11-18
+
+- 地板对齐 middleware v0.21.0(GatewayTrustPresented 导出)
+
 ## [v0.12.7] — 2026-11-18
 
 - 三项单源消费:RunServer 探活骨架委托 core/lifecycle.ReadyProbe(core#208 下沉件,本地 dial 循环/超时/哨兵副本删除);InstanceWatcher 改 registry/instancewatcher 薄 re-export(#319 归位收尾);四 adapter 接入 sdbridge 注册预算/权重兜底/nil fail-fast 单源(#216 收尾);行为与导出面不变,地板 core v0.17.0/registry v0.8.0
