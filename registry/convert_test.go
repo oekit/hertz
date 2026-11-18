@@ -58,3 +58,25 @@ func TestInstancesToHertz_Empty(t *testing.T) {
 		t.Errorf("len = %d, want 0", len(result))
 	}
 }
+
+// TestInstancesToHertz_FractionalWeightNotTruncatedToZero #335 回归：权重
+// 先判定后截断时，(0,1) 区间的小数权重（registry.Instance.Weight 是
+// float64，nacos 可配）会被 int() 截成 0 透传——违反「转换产物权重恒为正」
+// 契约。修法对齐 kitex #92：先截断再回填。
+func TestInstancesToHertz_FractionalWeightNotTruncatedToZero(t *testing.T) {
+	instances := []ereg.Instance{
+		{IP: "10.0.0.1", Port: 8080, Weight: 0.5},
+		{IP: "10.0.0.2", Port: 8081, Weight: 0.99},
+		{IP: "10.0.0.3", Port: 8082, Weight: 1.7}, // >1 的小数截断保留整数部分
+	}
+	got := InstancesToHertz(instances)
+	for i, inst := range got {
+		w := inst.Weight()
+		if w <= 0 {
+			t.Fatalf("实例 %d 权重 %v 截断后为 %d——(0,1) 区间权重被截成 0 透传（#335）", i, instances[i].Weight, w)
+		}
+	}
+	if got[2].Weight() != 1 {
+		t.Fatalf("权重 1.7 截断应得 1，got %d", got[2].Weight())
+	}
+}

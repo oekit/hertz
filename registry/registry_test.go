@@ -234,7 +234,7 @@ func TestToInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inst, err := toInstance(tt.info, tt.defaultWeight)
+			inst, err := toInstance(tt.info, tt.defaultWeight, "")
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("toInstance() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -304,5 +304,44 @@ func TestRegistry_Register_TimeoutBudget(t *testing.T) {
 	}
 	if dl, ok := creg.deregCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
 		t.Errorf("Deregister ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
+	}
+}
+
+// TestRegistryOptions_TimeoutFailFast #336 回归：预算选项 d<=0 构造期 panic
+// （对齐 kitex #191/#212 口径——预算是护栏，非法值静默接受等于没护栏）。
+func TestRegistryOptions_TimeoutFailFast(t *testing.T) {
+	for name, opt := range map[string]RegistryOption{
+		"WithRegisterTimeout":   WithRegisterTimeout(0),
+		"WithDeregisterTimeout": WithDeregisterTimeout(-time.Second),
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s(d<=0) 必须 panic（构造期 fail-fast）", name)
+				}
+			}()
+			opt(&hertzRegistry{})
+		})
+	}
+}
+
+// TestRegistry_DefaultServiceNameFallback #336 回归：Info.ServiceName 空串时
+// 用 WithDefaultServiceName 兜底；不设置时保持 fail-closed（报 service name
+// is empty）。
+func TestRegistry_DefaultServiceNameFallback(t *testing.T) {
+	// 兜底生效：注册成功且实例带上兜底名。
+	mock := &registrymocks.Registrar{}
+	r := NewRegistry(mock, WithDefaultServiceName("fallback-svc"))
+	fallbackAddr := &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080}
+	if err := r.Register(&hregistry.Info{Addr: fallbackAddr}); err != nil {
+		t.Fatalf("空 ServiceName + 兜底名应注册成功: %v", err)
+	}
+	if got := mock.Registered[0].Service; got != "fallback-svc" {
+		t.Fatalf("ServiceName = %q, want fallback-svc", got)
+	}
+	// fail-closed 保留：无兜底时空名硬报。
+	r2 := NewRegistry(&registrymocks.Registrar{})
+	if err := r2.Register(&hregistry.Info{Addr: fallbackAddr}); err == nil {
+		t.Fatal("空 ServiceName 无兜底必须报错（fail-closed 保留）")
 	}
 }

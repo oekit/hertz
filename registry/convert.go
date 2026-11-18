@@ -25,7 +25,11 @@ func InstancesToHertz(instances []ereg.Instance) []hdiscovery.Instance {
 	result := make([]hdiscovery.Instance, 0, len(instances))
 	for _, inst := range instances {
 		network, addr := sdbridge.InstanceEndpoint(inst)
-		weight := int(sdbridge.WeightOrDefault(inst.Weight, hregistry.DefaultWeight))
+		// hertz 权重是 int：先按 int 截断，再以 WeightOrDefault 对 <=0 回填
+		// ——若先判定后截断，(0,1) 区间的权重（registry.Instance.Weight 是
+		// float64，nacos 可配小数权重）会截成 0 透传（kitex #92 修法，#335）。
+		weight := int(inst.Weight)
+		weight = int(sdbridge.WeightOrDefault(float64(weight), float64(hregistry.DefaultWeight)))
 		result = append(result, hdiscovery.NewInstance(network, addr, weight, inst.Metadata))
 	}
 	return result
