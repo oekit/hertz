@@ -2,7 +2,6 @@ package nns
 
 import (
 	"context"
-	"time"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	nnsclient "github.com/oekit/nns/client"
@@ -10,17 +9,6 @@ import (
 	ereg "github.com/oekit/registry"
 	"github.com/oekit/registry/sdbridge"
 )
-
-// defaultRegisterTimeout 是 Register/Deregister（无 ctx 变体）的缺省单次
-// 预算（#317，kitex/nns-kitex #212 的 hertz 孪生，同 registry/kitex 的
-// #191 口径）：hregistry.Registry 接口无 ctx，框架在 engine.Spin 时自动
-// Register、优雅关停时 Deregister——裸 context.Background() 则底层
-// Registrar 拿到的 ctx 永无截止时间，注册中心不可达时（反）注册退化为
-// SDK 内部阻塞时长，拖住整个优雅关停序列。缺省 3s，应显著小于 bootstrap
-// 关停 closer 的预算（defaultTimeout），给错误处理与后续 closer 留出余量。
-// 需要自定义预算/取消的场景走 [Registry.RegisterContext] /
-// [Registry.DeregisterContext] 显式传 ctx。
-const defaultRegisterTimeout = 3 * time.Second
 
 // Registry 包装 nns ServiceClient，实现 Hertz server/registry.Registry。
 //
@@ -80,6 +68,14 @@ const (
 // client 为 nil 时 panic——与同包 [NewInstanceWatcher] 的 nil discoverer
 // 口径一致（构造期配置错误，启动即暴露），避免运行期空指针。
 //
+// ⚠️ 此处的 nil fail-fast 保留手写 `c == nil` 判定、不改收口
+// [sdbridge.EnsureNotNil]（#216）：EnsureNotNil 仅检接口层面的 nil，本参数
+// 是具体类型 *nnsclient.ServiceClient——类型化 nil 指针装箱进 any 后
+// `dep == nil` 恒为 false（EnsureNotNil 文档明示的范围外），照搬会静默放行
+// nil client、把 panic 拖到运行期空指针，恰是 #219 要消灭的形态。参数为
+// 接口类型的构造器（hertz/registry.NewRegistry 的 ereg.Registrar）才走
+// EnsureNotNil 单源。
+//
 // ⚠️ 返回类型由 [hregistry.Registry] 接口改为具体类型 *Registry（仍实现该
 // 接口，赋值/传参不受影响）：为的是让带 ctx 的注册方法可直接调用。
 func NewRegistry(c *nnsclient.ServiceClient, opts ...RegistryOption) *Registry {
@@ -99,13 +95,18 @@ func NewRegistry(c *nnsclient.ServiceClient, opts ...RegistryOption) *Registry {
 // Register 将 Hertz 服务实例注册到 NNS 注册中心。
 //
 // Hertz 的 [hregistry.Registry] 接口没有 ctx 形参（engine 在 Spin 时调用），
-// 故此处以 context.Background() 加单次超时预算（#317，kitex #212 的 hertz
-// 孪生）派生 ctx——注册中心不可达时最多阻塞 defaultRegisterTimeout，不再
-// 无界阻塞；需要自定义预算/取消的场景用 [Registry.RegisterContext]。
+// 单次预算（#317，kitex #212 的 hertz 孪生）收口单源
+// [sdbridge.RegisterWithBudget]（#216 消费，删手写 WithTimeout 拷贝）——
+// 注册中心不可达时最多阻塞缺省预算 sdbridge.DefaultRegisterBudget（3s），
+// 不再无界阻塞；需要自定义预算/取消的场景用 [Registry.RegisterContext]。
 func (r *Registry) Register(info *hregistry.Info) error {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultRegisterTimeout)
-	defer cancel()
-	return r.RegisterContext(ctx, info)
+	inst, err := buildInstance(info, r.defaultWeight)
+	if err != nil {
+		return err
+	}
+	return r.applyRegistrar(degradedRegisterMsg, func(reg ereg.Registrar) error {
+		return sdbridge.RegisterWithBudget(context.Background(), reg, inst, sdbridge.DefaultRegisterBudget)
+	})
 }
 
 // RegisterContext 与 [Registry.Register] 同语义，但显式传入 ctx
@@ -123,12 +124,16 @@ func (r *Registry) RegisterContext(ctx context.Context, info *hregistry.Info) er
 // Deregister 从 NNS 注册中心注销 Hertz 服务实例。
 // 与 Register 对称：保留 tags 并走 defaultWeight 兜底，
 // 依赖 metadata/权重匹配的注册中心才能正确注销。
-// 优雅关停路径的单次预算（#317）：注册中心不可达时最多阻塞
-// defaultRegisterTimeout，不再拖死关停序列。
+// 优雅关停路径的单次预算（#317）收口单源 [sdbridge.DeregisterWithBudget]
+// （#216 消费）：注册中心不可达时最多阻塞缺省预算（3s），不再拖死关停序列。
 func (r *Registry) Deregister(info *hregistry.Info) error {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultRegisterTimeout)
-	defer cancel()
-	return r.DeregisterContext(ctx, info)
+	inst, err := buildInstance(info, r.defaultWeight)
+	if err != nil {
+		return err
+	}
+	return r.applyRegistrar(degradedDeregisterMsg, func(reg ereg.Registrar) error {
+		return sdbridge.DeregisterWithBudget(context.Background(), reg, inst, sdbridge.DefaultRegisterBudget)
+	})
 }
 
 // DeregisterContext 与 [Registry.Deregister] 同语义，但显式传入 ctx
