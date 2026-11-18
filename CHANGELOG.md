@@ -1,3 +1,13 @@
+## [v0.13.0] — 2026-11-19
+
+- 第二轮重复逻辑深挖审计（2026-11-19）hertz 修复与能力面对齐：
+
+- fix: InstancesToHertz 权重改先 int 截断再 WeightOrDefault 回填——旧顺序先判定后截断会把 (0,1) 区间小数权重（float64，nacos 可配）截成 0 透传，违反「转换产物权重恒为正」godoc 契约（kitex #92 修法的 hertz 侧落地），补小数权重回归用例（#335）
+- feat: registry 与 nns 两 adapter 补 WithRegisterTimeout/WithDeregisterTimeout（d<=0 构造期 panic，对齐 kitex #191/#212 口径——跨地域注册中心/慢网络下缺省 3s 硬编码无解）与 WithDefaultServiceName（nns 侧三级兜底链：显式 → GetLocalService → fail-closed 保留，对齐 kitex #93）（#336）
+- refactor: 两 adapter defaultWeight 裸 10 接 ereg.DefaultInstanceWeight（#214 权重维度闭合）；bootstrap h.Run() 失败日志补 name 字段（多 server 进程定位）（#336）
+
+关联问题单：hertz#335、hertz#336。
+
 ## [v0.12.8] — 2026-11-18
 
 - 地板对齐 middleware v0.21.0(GatewayTrustPresented 导出)
