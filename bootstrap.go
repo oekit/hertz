@@ -2,7 +2,6 @@ package hertz
 
 import (
 	"context"
-	"net"
 	"runtime/debug"
 	"time"
 
@@ -15,20 +14,12 @@ import (
 
 var bootstrapLog = logx.Delegating("hertz-bootstrap")
 
-// defaultReadyProbeTimeout 是 WithOnReady 启用后的默认探活超时。
-const defaultReadyProbeTimeout = 5 * time.Second
-
-// errProbeAborted 是「探活被正常关停打断」的哨兵错误（#48）。
-//
-// 语义拆分：**探活失败**（启动失败 ⇒ 按失败处理、请求关机）与**探活被关停打断**
-// （正常终止 ⇒ 预期路径）是两件事。关停不是失败——调用方用 errors.Is 判定后
-// 只记一条 Info，且不再调 app.RequestShutdown()（进程本就在关停，再请求一次
-// 是多余动作；旧实现把关停记成 ERROR「ready probe failed」，值班的人会误以为
-// 服务启动失败）。
-//
-// 该错误只由 probeAndReady 在 ctx 被取消时返回；探活超时等真正的启动失败
-// 仍返回普通 error。
-var errProbeAborted = errors.New("ready probe aborted: app shutting down")
+// errProbeAborted 是「探活被正常关停打断」的哨兵错误（#48）的 hertz 侧本地
+// 别名（#208 消费 core/lifecycle.ReadyProbe 单源）：哨兵实现单源自
+// lifecycle.ErrProbeAborted（同一下沉哨兵，文案与 errors.Is 判定逐字一致），
+// 本地别名仅为既有调用点/测试的名称可读性保留——探活被关停打断（正常终止 ⇒
+// 预期路径）与探活失败（启动失败 ⇒ 请求关机）的语义拆分见 lifecycle 包文档。
+var errProbeAborted = lifecycle.ErrProbeAborted
 
 // RunServerOption 配置 RunServer 的就绪回调行为。
 type RunServerOption func(*runServerConfig)
@@ -195,7 +186,7 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 					return
 				}
 				bootstrapLog.Error("hertz ready probe failed, requesting shutdown",
-					logx.ErrKey, err)
+					"name", name, logx.ErrKey, err)
 				app.RequestShutdown()
 			})
 		}
@@ -228,132 +219,122 @@ func shutdownErrTolerable(wasRunning bool, err error) bool {
 	return err == nil || !wasRunning
 }
 
-// probeAndReady 循环 TCP dial 探活监听地址，可建连后执行 onReady。
-//
-// 四条守则（#43 / #48 / #131）：
-//   - 只在 engine 进入 running 之后才发起探活：端口绑定前探活必然 refused，
-//     白白重试到超时；
-//   - 探活通过后复核 engine 仍在 running：端口被**他人**占用时，探活连上的
-//     是对方的监听器，而本进程的 server 实际已启动失败（netpoll 监听失败
-//     直接 panic），此时不得回调 onReady —— 否则会把不属于自己的实例
-//     注册到注册中心。
-//   - **关停优先于超时判定**（#48）：ctx 被取消（正常关停）时返回哨兵
-//     errProbeAborted，而不是「探活超时」——两者在调用方是不同语义（正常终止
-//     vs 启动失败）。每次判定超时前先看 ctx.Err()，避免「关停与超时同时发生」
-//     时把关停误报成启动失败。
-//   - 探活目标解析（#131）：优先 Options.Addr（server.WithHostPorts 只存
-//     单个地址；server.WithListener 也会把 Addr 设为 ln.Addr()）。Addr 为空
-//     但保留了 Listener 时退回探 listener 地址；两者皆空（server 将在
-//     h.Run() 内绑定随机端口，地址事先未知）时无法 dial——至少等到 engine
-//     进入 running 再回调，消除「onReady 在 server 尚未 serve 时立即执行」
-//     的未监听窗口（窗口内注册中心已有实例但端口未监听，健康检查/首轮流量
-//     直接失败）。
-//
-// probeTimeoutOrDefault 归一探活超时：零值/缺省 = 默认 5s（#129）。
-// 负数不会走到这里（probeDisabled 时 RunServer 不启动探活，#146），
-// 不再存在「负数悄悄换默认值继续探」的回退。
+// probeTimeoutOrDefault 归一探活超时：零值/缺省 = 默认 5s（#129）。默认值
+// 单源自 lifecycle.DefaultProbeTimeout（#208 消费，原本地
+// defaultReadyProbeTimeout 常量删除，逐值一致 5s）。负数不会走到这里
+// （probeDisabled 时 RunServer 不启动探活，#146），不再存在「负数悄悄换
+// 默认值继续探」的回退。
 func (cfg *runServerConfig) probeTimeoutOrDefault() time.Duration {
 	if cfg.probeTimeout <= 0 {
-		return defaultReadyProbeTimeout
+		return lifecycle.DefaultProbeTimeout
 	}
 	return cfg.probeTimeout
 }
 
+// probeAndReady 探活监听地址，可建连并通过退出复核后执行 onReady。
+//
+// #208 消费后 dial 循环、超时预算（总超时/单次 dial 500ms/重试 100ms）、
+// 关停哨兵与 onReady panic 收编（#152）单源自 core/lifecycle.ReadyProbe，
+// hertz 侧只保留领域皮——探活目标解析（probeTarget，#131）、IsRunning
+// 就绪门来源（watchEngineRunning）与日志。既有守则不变：
+//   - 只在 engine 进入 running 之后才发起探活（#43）：Started 门由
+//     watchEngineRunning 把 IsRunning 轮询转成 close；
+//   - 探活通过后复核 engine 仍在 running（#120/#131）：Exited 门——端口被
+//     **他人**占用时，探活连上的是对方的监听器，而本进程的 server 实际已
+//     启动失败（netpoll 监听失败直接 panic），此时不得回调 onReady，否则会
+//     把不属于自己的实例注册到注册中心；
+//   - **关停优先于超时判定**（#48）：ctx 被取消（正常关停）时 ReadyProbe.Run
+//     返回哨兵 errProbeAborted（= lifecycle.ErrProbeAborted），调用方按
+//     正常终止处置，不误报启动失败；
+//   - 探活目标解析（#131）：优先 Options.Addr（server.WithHostPorts 只存
+//     单个地址；server.WithListener 也会把 Addr 设为 ln.Addr()）。Addr 为空
+//     但保留了 Listener 时退回探 listener 地址；两者皆空（server 将在
+//     h.Run() 内绑定随机端口，地址事先未知）时返回空 addr——ReadyProbe 视为
+//     「无拨号目标」，退化为「等 engine running 再回调」，消除「onReady 在
+//     server 尚未 serve 时立即执行」的未监听窗口（窗口内注册中心已有实例
+//     但端口未监听，健康检查/首轮流量直接失败）。
+//
+// onReady 以 app 根 ctx 交付（与下沉前 callOnReady(name, cfg.onReady,
+// app.Context()) 同口径）：典型用途是延迟注册 app.Ready()，回调的生命周期
+// 与 app 一致而非探活协程；其 panic 由 ReadyProbe.Run 转为 error 返回
+// （#152 单源），走既有失败链（Error 日志 + RequestShutdown）。
 func probeAndReady(ctx context.Context, app lifecycle.App, name string, h *server.Hertz, cfg *runServerConfig) error {
-	timeout := cfg.probeTimeoutOrDefault()
-
-	opts := h.GetOptions()
-	addr := opts.Addr
-	if addr == "" && opts.Listener != nil {
-		addr = opts.Listener.Addr().String()
-	}
-	network := opts.Network
-	if network == "" {
-		network = "tcp"
-	}
-
+	network, addr := probeTarget(h)
 	if addr == "" {
 		// 无任何可探地址（Addr 与 Listener 皆空）：无法 TCP dial，退化为
 		// 「等 engine running 再回调」（#131），仍受同一超时与关停语义约束。
 		bootstrapLog.Info("hertz ready probe has no dial target, waiting for engine running before onReady",
 			"name", name)
-		deadline := time.Now().Add(timeout)
-		for !h.IsRunning() {
-			if ctx.Err() != nil {
-				return errProbeAborted
-			}
-			if time.Now().After(deadline) {
-				return errors.Newf("ready probe timeout after %s: server not running and no dial target", timeout)
-			}
-			select {
-			case <-ctx.Done():
-				return errProbeAborted
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-		return callOnReady(name, cfg.onReady, app.Context())
 	}
 
-	deadline := time.Now().Add(timeout)
+	started, exited := make(chan struct{}), make(chan struct{})
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	async.GoSafe(func() {
+		watchEngineRunning(ctx, stopWatch, h, started, exited)
+	})
+
+	probe := lifecycle.NewReadyProbe(lifecycle.WithProbeTimeout(cfg.probeTimeoutOrDefault()))
+	err := probe.Run(ctx, lifecycle.ProbeRequest{
+		Target:  func(context.Context) (string, string) { return network, addr },
+		Started: started,
+		Exited:  exited,
+		OnReady: func(context.Context) { cfg.onReady(app.Context()) },
+	})
+	if err == nil {
+		bootstrapLog.Info("hertz ready probe passed", "name", name, "addr", addr)
+	}
+	return err
+}
+
+// probeTarget 解析探活目标（#131，hertz 侧保留的领域皮）：优先 Options.Addr
+// （server.WithHostPorts 只存单个地址；server.WithListener 也会把 Addr 设为
+// ln.Addr()）。Addr 为空但保留了 Listener 时退回探 listener 地址；两者皆空
+// 时返回空 addr（ReadyProbe 视为无拨号目标）。Network 为空按 "tcp" 处理
+// （与 ReadyProbe.Run 的兜底一致）。
+func probeTarget(h *server.Hertz) (network, addr string) {
+	opts := h.GetOptions()
+	addr = opts.Addr
+	if addr == "" && opts.Listener != nil {
+		addr = opts.Listener.Addr().String()
+	}
+	network = opts.Network
+	if network == "" {
+		network = "tcp"
+	}
+	return network, addr
+}
+
+// watchEngineRunning 把 h.IsRunning() 轮询转成 ReadyProbe 的 Started/Exited
+// 就绪门信号（#208 下沉后 hertz 侧保留的「IsRunning 就绪门来源」）：
+//   - engine 首次进入 running：close(started)——端口绑定发生在 h.Run() 内部，
+//     ReadyProbe 在此之前不发 dial（先探活后启动必然 connection refused，#43）；
+//   - started 关闭后 engine 首次离开 running：close(exited)——ReadyProbe 建连
+//     成功后复核该信号，端口被他人抢占、本进程 server 已启动失败时不得回调
+//     onReady（#120/#131 TOCTOU）。
+//
+// engine 未被观察到进入 running 就退出时两门都不关：Started 等门超时按启动
+// 失败收敛（与下沉前 dial 循环「等 running 到超时」同语义）。轮询间隔与
+// 下沉前等 running 的 sleep 一致（10ms）。ctx 取消或 stop 关闭即返回。
+func watchEngineRunning(ctx context.Context, stop <-chan struct{}, h *server.Hertz, started, exited chan struct{}) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	runningSeen := false
 	for {
-		if !h.IsRunning() {
-			// engine 尚未 running（还没走到 listenAndServe）：等它起来再探。
-			if ctx.Err() != nil {
-				return errProbeAborted
-			}
-			if time.Now().After(deadline) {
-				return errors.Newf("ready probe timeout after %s, addr=%s: server not running", timeout, addr)
-			}
-			select {
-			case <-ctx.Done():
-				return errProbeAborted
-			case <-time.After(10 * time.Millisecond):
-			}
-			continue
-		}
-		d := net.Dialer{Timeout: 500 * time.Millisecond}
-		conn, err := d.DialContext(ctx, network, addr)
-		if err == nil {
-			_ = conn.Close()
-			if !h.IsRunning() {
-				return errors.Newf("ready probe connected but server is not running, addr=%s", addr)
-			}
-			bootstrapLog.Info("hertz ready probe passed", "name", name, "addr", addr)
-			return callOnReady(name, cfg.onReady, app.Context())
-		}
-		// 关停优先于超时：ctx 已取消 ⇒ 探活是被正常关停打断，不是启动失败。
-		if ctx.Err() != nil {
-			return errProbeAborted
-		}
-		if time.Now().After(deadline) {
-			return errors.Wrapf(err, "ready probe timeout after %s, addr=%s", timeout, addr)
+		running := h.IsRunning()
+		if running && !runningSeen {
+			runningSeen = true
+			close(started)
+		} else if runningSeen && !running {
+			close(exited)
+			return
 		}
 		select {
 		case <-ctx.Done():
-			return errProbeAborted
-		case <-time.After(100 * time.Millisecond):
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
 		}
 	}
-}
-
-// callOnReady 执行就绪回调并把 panic 转为 error 返回（#152）。
-//
-// onReady 是就绪/注册动作（典型用途：延迟 Nacos 注册 app.Ready()）——它
-// panic 意味着就绪路径已炸。修复前探活路径的两处 onReady 调用裸奔在
-// async.GoSafe 里：panic 沿 probeAndReady 展开，外层闭包的 err 处置
-// （探活失败 ⇒ Error + RequestShutdown）整段被跳过，GoSafe recover 后
-// 仅记一条日志 ⇒ server 以「探活已过、回调丢失、永不注册」的半启动形态
-// 继续 serve——恰是本模块在别处按致命处置的「进程假活」形态。
-// 探活协程内按探活失败语义收敛：panic → error，走既有失败链
-// （Error 日志 + RequestShutdown）。与 probeDisabled 路径同一 panic 政策：
-// onReady panic = 启动失败，绝不留半启动 server（禁用路径在 GoBackground
-// 之前同步回调，panic 直接传播给 RunServer 调用方，server 尚未启动）。
-func callOnReady(name string, fn func(ctx context.Context), ctx context.Context) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = errors.Newf("hertz %s onReady panicked: %v", name, r)
-		}
-	}()
-	fn(ctx)
-	return nil
 }
