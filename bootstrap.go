@@ -192,7 +192,7 @@ func RunServer(app lifecycle.App, name string, h *server.Hertz, opts ...RunServe
 		}
 		if err := h.Run(); err != nil {
 			bootstrapLog.Error("hertz server stopped with error, requesting shutdown",
-				logx.ErrKey, err)
+				"name", name, logx.ErrKey, err)
 			app.RequestShutdown()
 		}
 	})

@@ -217,3 +217,39 @@ func TestRegistry_ImplementsContextRegistry(t *testing.T) {
 	var _ hregistry.Registry = (*Registry)(nil)
 	var _ ContextRegistry = (*Registry)(nil)
 }
+
+// TestNnsRegistry_TimeoutOptions_FailFastAndPassthrough #336 回归：预算选项
+// d<=0 构造期 panic（对齐 kitex/nns #212 口径）；配置的预算真正传到
+// DeregisterWithBudget（ctx deadline 可见）。
+func TestNnsRegistry_TimeoutOptions_FailFastAndPassthrough(t *testing.T) {
+	fr := &registrymocks.Registrar{}
+	c := nnsclient.New(nnsclient.WithRegistrar(fr))
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("WithRegisterTimeout(0) 必须 panic（构造期 fail-fast）")
+		}
+	}()
+	_ = NewRegistry(c, WithRegisterTimeout(0))
+}
+
+// TestNnsRegistry_DefaultServiceNameFallback #336 回归：Info.ServiceName
+// 空串时 WithDefaultServiceName 兜底生效；无兜底保持 fail-closed。
+func TestNnsRegistry_DefaultServiceNameFallback(t *testing.T) {
+	fr := &registrymocks.Registrar{}
+	c := nnsclient.New(nnsclient.WithRegistrar(fr))
+
+	addr := &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080}
+	r := NewRegistry(c, WithDefaultServiceName("fallback-svc"))
+	if err := r.Register(&hregistry.Info{Addr: addr}); err != nil {
+		t.Fatalf("空 ServiceName + 兜底名应注册成功: %v", err)
+	}
+	if got := fr.Registered[0].Service; got != "fallback-svc" {
+		t.Fatalf("Service = %q, want fallback-svc", got)
+	}
+
+	r2 := NewRegistry(c)
+	if err := r2.Register(&hregistry.Info{Addr: addr}); err == nil {
+		t.Fatal("空 ServiceName 无兜底必须报错（fail-closed 保留）")
+	}
+}
