@@ -1,3 +1,7 @@
+## [v0.12.7] — 2026-11-18
+
+- 三项单源消费:RunServer 探活骨架委托 core/lifecycle.ReadyProbe(core#208 下沉件,本地 dial 循环/超时/哨兵副本删除);InstanceWatcher 改 registry/instancewatcher 薄 re-export(#319 归位收尾);四 adapter 接入 sdbridge 注册预算/权重兜底/nil fail-fast 单源(#216 收尾);行为与导出面不变,地板 core v0.17.0/registry v0.8.0
+
 ## [v0.12.6] — 2026-11-18
 
 - health checker panic 走 pkg/errors.Recovered 收编(#182 口径,#316);registry/nns adapter Register/Deregister 补 3s 超时预算,注册中心不可达不再无界阻塞/拖死优雅关停(kitex#191/#212 孪生,#317);InstancesToHertz weight<=0 回填 DefaultWeight(kitex#92 孪生,#318);health DegradedError 收敛 pkg/errors 单源(pkg v0.53.0)
