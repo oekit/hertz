@@ -210,8 +210,8 @@ github.com/oekit/bootstrap v0.7.14 h1:4cWRyrYwKJxBj03PUatV1Fca7We03G7TEk+T/WSZow
 github.com/oekit/bootstrap v0.7.14/go.mod h1:aRWhfkoj+4C1DFLvgCGdJzprQlZIdl+UopEPTBe93c8=
 github.com/oekit/concurrency v0.39.0 h1:Zja2itPooyUflmPj49cD2Qr/ZmMVjKeTs/omOkYfVNA=
 github.com/oekit/concurrency v0.39.0/go.mod h1:7vqYsmVI7sDUFFf+Hf2i6PRJ0MTZENV4iw6ywsGS+tQ=
-github.com/oekit/core v0.16.0 h1:G+HhJZBNaH9rVK4J7eLaWBiMhTpPxqmwZ0C+zbl7T4Y=
-github.com/oekit/core v0.16.0/go.mod h1:k0t/uku9onK9MOQFJqycRSht8IymCWC93CtO+VDiDMc=
+github.com/oekit/core v0.17.0 h1:WdulaPQYpvbVFxt5Uv4/Id7OeSadhJfMQsAAYj1GnNw=
+github.com/oekit/core v0.17.0/go.mod h1:/FnLhIZKDHgplPRKsSbF283hXgA8Hp1viAhmg/Tn3Zg=
 github.com/oekit/gormx v0.13.0 h1:cy+x8R1gggMoN2CZgdM6xBuhdettKdh8OjARAUvTy6Q=
 github.com/oekit/gormx v0.13.0/go.mod h1:M/HlIvmU90y3yj+UDFxa1Ysbs0fQgnDcqo93Lu3GLQs=
 github.com/oekit/kitx v0.11.0 h1:wIJ0lyIWQ1XUlyMXtWpQL3wFcfGgvJ7JUnPhY6ieBpU=
@@ -226,10 +226,10 @@ github.com/oekit/middleware v0.20.1 h1:T+eWg19cioji9sYxe1ThcHBqF0Z/xfdfjb8zDNAS7
 github.com/oekit/middleware v0.20.1/go.mod h1:7ECuSqDFMEQVLelEJf+73W7m+yHforJLWSnxKKJo/a4=
 github.com/oekit/nns v0.9.3 h1:yGoi9IQmCKT9dSbvEApimFI23TbNuw8ufOB7bxX8fnU=
 github.com/oekit/nns v0.9.3/go.mod h1:/DZJ2Xe+6KdT+unpUYuJwOHi4g9Y49QhlI1ortnKb00=
-github.com/oekit/pkg v0.53.0 h1:aZXhWFGCvobXsznIvoi8cMgrwlIpez+8hpLylijgxjU=
-github.com/oekit/pkg v0.53.0/go.mod h1:Cr6sJpBX2a0gAIgLa32+NY69h/UZtuN6L1ZdXtP9upo=
-github.com/oekit/registry v0.7.0 h1:V9nmYGFVp5UpkDKzqAtdxt5GV1AJjWwMhXoQiKocHCo=
-github.com/oekit/registry v0.7.0/go.mod h1:1y3H6ptvgm44ICzz7Ypqc3XcNfP6iWX/9PK0VZbUAOg=
+github.com/oekit/pkg v0.54.0 h1:VTw8m9aFuaNy9jE3VKdYG4WOSvNAlUf/H+vw+t4abSQ=
+github.com/oekit/pkg v0.54.0/go.mod h1:Cr6sJpBX2a0gAIgLa32+NY69h/UZtuN6L1ZdXtP9upo=
+github.com/oekit/registry v0.8.0 h1:ghvPvZ+WRVKmij5XwioPv+LokbG4l0NhA6DfQmUSzTk=
+github.com/oekit/registry v0.8.0/go.mod h1:u3rK0yYfTKzPZKcR8r6MI7fDkwkZq+et6R75UDJpi/Q=
 github.com/oekit/registry/nacos v0.2.0 h1:4FD78/FRU++fURBrJow3KG2vWinKfCidyTIAbE+RN00=
 github.com/oekit/registry/nacos v0.2.0/go.mod h1:sFjI+MaObocJcU8+wfq3NgcRxxpKQzrrzLiMNDMtcJk=
 github.com/oekit/registry/nacosimpl v0.3.0 h1:ZWtCMGCoWySN2iyzmNJYrdhB2805EPaDeMzp7A+Ot0s=
