@@ -8,7 +8,7 @@
 ## 安装
 
 ```bash
-go get github.com/oekit/hertz@v0.12.8
+go get github.com/oekit/hertz@v0.13.0
 ```
 
 ## 这个仓库做什么
