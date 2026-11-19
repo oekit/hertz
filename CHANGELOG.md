@@ -1,3 +1,9 @@
+## [v0.14.0] — 2026-11-20
+
+- fix(governance): govhertz 限流拒绝改走 mw.ErrorResp 信封（code/message/trace_id/Abort 与 mw.RateLimitMiddleware 同源）+ Retry-After/X-RateLimit-Reset 锁内结算——此前裸 AbortWithStatus(429) 空体无重试头，同进程双限流两轨响应面（#343）
+docs(chainmw): Wrap godoc 补警示——链内不得放 core/chain.Timeout（硬掐断被弃 goroutine 与 Wrap 侧 Fail 双写同一响应缓冲）；hertz 链超时治理走 hertz/governance（#343）
+⚠ 行为面：govhertz 拒绝响应由空体 429 变为 JSON 信封+Retry-After（HTTP 状态码不变）
+
 ## [v0.13.0] — 2026-11-19
 
 - 第二轮重复逻辑深挖审计（2026-11-19）hertz 修复与能力面对齐：
