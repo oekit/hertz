@@ -9,7 +9,7 @@ require (
 	github.com/oekit/bootstrap v0.7.14
 	github.com/oekit/concurrency v0.39.1
 	github.com/oekit/core v0.17.1
-	github.com/oekit/gormx v0.13.1
+	github.com/oekit/gormx v0.13.2
 	github.com/oekit/kitx v0.12.1
 	github.com/oekit/logx v0.12.0
 	github.com/oekit/metrics v0.4.2
