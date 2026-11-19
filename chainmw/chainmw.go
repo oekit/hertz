@@ -39,6 +39,15 @@ func WithOnError(fn func(ctx context.Context, c *app.RequestContext, err error))
 // Wrap 把中间件栈包装为 Hertz handler：req 形参即 *app.RequestContext，
 // 自动注入 server Transporter；terminal 收 (ctx, c)。
 // 链返回非 nil error 时走错误出口（默认 middleware.Fail 统一响应格式）。
+//
+// ⚠️ 链内不得放 core/chain.Timeout（#343）：Timeout 超时先到即向 Wrap 返回
+// DeadlineExceeded → Wrap 侧 mw.Fail 写错误响应；被弃的下游 goroutine 仍在
+// 后台跑（Timeout 的语义边界：不理会 ctx 取消的下游无法强制中断），其后对
+// c 的任何响应写入都与 Fail 的错误体落进**同一份** *app.RequestContext
+// 响应缓冲——双写/交错写，响应面损坏且无信号。hertz 链的超时治理走
+// hertz/governance 的 NewTimeoutMiddleware：只注入 per-request deadline、
+// 由下游 ctx 感知依赖提前中止，治理侧不掐断响应（cancel 时机 #235 已钉：
+// 不早于 deadline）。
 func Wrap(mws []chain.Middleware, terminal app.HandlerFunc, opts ...WrapOption) app.HandlerFunc {
 	cfg := &wrapConfig{}
 	for _, opt := range opts {

@@ -12,13 +12,16 @@ package govhertz
 
 import (
 	"context"
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 
 	"github.com/oekit/core/governance"
+	mw "github.com/oekit/middleware"
 )
 
 // routePath 返回用于治理策略匹配的路径:优先取**路由模板**
@@ -56,7 +59,12 @@ func bucketCapacity(pol governance.LimiterPolicy) int {
 	return pol.Rate
 }
 
-func (b *bucket) allow(now time.Time) bool {
+// allow 消费一个令牌;被拒时返回下一个可用令牌的建议等待时长(Retry-After
+// 口径,#343):按当前速率补到 1 个令牌需 (1-tokens)/rate 秒。等待时长与
+// 放行判定在同一把锁内、同一份桶态上结算——锁外二次读桶态与并发消费构成
+// 竞态。被拒请求不消耗令牌,与 concurrency TokenBucket.RetryAfter 的
+// 「探测不消耗配额」语义一致。
+func (b *bucket) allow(now time.Time) (bool, time.Duration) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	burst := bucketCapacity(b.policy)
@@ -67,10 +75,17 @@ func (b *bucket) allow(now time.Time) bool {
 		b.tokens = float64(burst)
 	}
 	if b.tokens < 1 {
-		return false
+		// Rate>0 由 governance.Parse→Validate 保证(limiter.rate must be > 0);
+		// 0 值防御性回退为不给出等待时长(0 经 setRateLimitRejectHeaders 的
+		// 下限钳制仍回 Retry-After: 1)。
+		if b.policy.Rate <= 0 {
+			return false, 0
+		}
+		wait := time.Duration(float64(time.Second) * (1 - b.tokens) / float64(b.policy.Rate))
+		return false, wait
 	}
 	b.tokens--
-	return true
+	return true, 0
 }
 
 // newBucket 构造新桶：初始令牌数 = 桶容量（#234）。此前写死 pol.Rate——
@@ -102,8 +117,11 @@ func applySnapshot(b *bucket, pol governance.LimiterPolicy, gen int64) {
 }
 
 // NewLimiterMiddleware 返回动态限流中间件:按 "METHOD:path" → "path" → ""
-// 从 Store 取 LimiterPolicy,超限返 429。策略变化按配置代际单向原地生效
-// (旧快照不回退、不清桶态,见 [applySnapshot])。
+// 从 Store 取 LimiterPolicy,超限拒绝(#343:429 + Retry-After/X-RateLimit-Reset
+// 响应头 + mw.ErrorResp 统一 JSON 信封,口径对齐 mw.RateLimitMiddleware 的
+// 拒绝响应面——此前裸 429 空体、无 Retry-After,是同进程三轨拒绝响应面里
+// 最裸的一轨)。策略变化按配置代际单向原地生效(旧快照不回退、不清桶态,
+// 见 [applySnapshot])。
 //
 // store 必须非 nil:构造期 fail-fast(#291,与 nns.NewInstanceWatcher /
 // registry.NewRegistry 同口径)——nil 会把解引用推迟到首个请求才 panic
@@ -140,12 +158,39 @@ func NewLimiterMiddleware(store *governance.Store) app.HandlerFunc {
 		}
 		b := v.(*bucket)
 		applySnapshot(b, pol, gen)
-		if !b.allow(now) {
-			c.AbortWithStatus(http.StatusTooManyRequests)
+		if ok, wait := b.allow(now); !ok {
+			// #343:拒绝响应对齐 mw.RateLimitMiddleware 的口径(middleware
+			// ratelimit.go 拒绝路径)——先写 Retry-After/X-RateLimit-Reset
+			// (等待时长由 [bucket.allow] 的桶态直接推出),再走 mw.ErrorResp
+			// 统一 JSON 信封(与 mw 默认拒绝路径同一出口:HTTP 对齐码直复用、
+			// trace_id 经 hmw.FromRequestContext 提取、写完 Abort)。govhertz
+			// 是并发治理薄适配层,复用 mw.ErrorResp 而非本地再造信封同构体:
+			// 同进程统一响应面只此一套,StatusMapper/信封字段变化不会漂移。
+			setRateLimitRejectHeaders(c, wait)
+			mw.ErrorResp(c, http.StatusTooManyRequests, "too many requests")
 			return
 		}
 		c.Next(ctx)
 	}
+}
+
+// 限流拒绝响应头(#343,名称对齐 mw.RateLimitMiddleware 的同名常量)。
+const (
+	headerRetryAfter     = "Retry-After"
+	headerRateLimitReset = "X-RateLimit-Reset"
+)
+
+// setRateLimitRejectHeaders 写限流拒绝响应头(#343,口径对齐 mw 的
+// setRateLimitRejectHeaders——该函数在 middleware 仓未导出,这里同构本地化):
+// Retry-After 按 delay-seconds 口径向上取整、下限 1(0 会被客户端解读为
+// 「立即重试」,与被拒语义矛盾);X-RateLimit-Reset 为配额恢复时刻(Unix 秒)。
+func setRateLimitRejectHeaders(c *app.RequestContext, retryAfter time.Duration) {
+	seconds := int(math.Ceil(retryAfter.Seconds()))
+	if seconds < 1 {
+		seconds = 1
+	}
+	c.Response.Header.Set(headerRetryAfter, strconv.Itoa(seconds))
+	c.Response.Header.Set(headerRateLimitReset, strconv.FormatInt(time.Now().Add(retryAfter).Unix(), 10))
 }
 
 // NewTimeoutMiddleware 返回动态超时中间件:按 "METHOD:path" → "path" →
