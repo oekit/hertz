@@ -645,6 +645,68 @@ func TestLimiterMiddleware_BurstInitialTokens(t *testing.T) {
 	}
 }
 
+// ==================== 拒绝响应面（#343） ====================
+
+// TestLimiterMiddleware_RejectEnvelope 回归 #343:限流拒绝响应面对齐
+// mw.RateLimitMiddleware 口径——429 + mw.ErrorResp 统一 JSON 信封(code/data/
+// message/trace_id)+ Retry-After/X-RateLimit-Reset 响应头,且 handler 不执行
+// (ErrorResp 写完 Abort)。此前裸 429 空体、无 Retry-After:同进程三轨拒绝
+// 响应面(mw 限流 429 信封 / mw 降载 503 信封 / govhertz 裸 429)里最裸的一轨。
+func TestLimiterMiddleware_RejectEnvelope(t *testing.T) {
+	store := governance.NewStore(nil)
+	cfg, _ := governance.Parse([]byte(`{"limiter":{"GET:/hot":{"rate":1,"burst":1}}}`))
+	store.Update(cfg)
+
+	h := server.New(
+		server.WithHostPorts("127.0.0.1:0"),
+		server.WithDisablePrintRoute(true),
+	)
+	h.Use(NewLimiterMiddleware(store))
+	var hit bool
+	h.GET("/hot", func(_ context.Context, c *app.RequestContext) {
+		hit = true
+		c.String(200, "ok")
+	})
+
+	if w := ut.PerformRequest(h.Engine, "GET", "/hot", nil); w.Code != 200 {
+		t.Fatalf("first request = %d, want 200", w.Code)
+	}
+	before := time.Now().Unix()
+	hit = false // 首个放行请求已置位,重置后单看被拒请求
+	w := ut.PerformRequest(h.Engine, "GET", "/hot", nil)
+	if w.Code != 429 {
+		t.Fatalf("second request = %d, want 429", w.Code)
+	}
+	if hit {
+		t.Error("rejected request must not reach the handler (ErrorResp aborts)")
+	}
+
+	// 统一 JSON 信封:与 mw.RateLimitMiddleware 默认拒绝路径同一出口
+	// (mw.ErrorResp),data 恒为 null
+	body := w.Body.String()
+	for _, want := range []string{`"code":429`, `"data":null`, `"message":"too many requests"`, `"trace_id":`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body = %q, want containing %s (unified envelope, #343)", body, want)
+		}
+	}
+
+	// Retry-After:delay-seconds 整数、下限 1。rate=1/burst=1 下被拒意味着
+	// 下一个令牌恰在 (0,1] 秒内 ⇒ ceil 后恒为 1(与 mw ratelimit_test 的
+	// 推演同口径)
+	ra := string(w.Header().Peek(headerRetryAfter))
+	if n, err := strconv.Atoi(ra); err != nil || n < 1 {
+		t.Errorf("Retry-After = %q, want integer >= 1 (#343)", ra)
+	}
+	// X-RateLimit-Reset:配额恢复时刻(Unix 秒),须落在请求时刻与 now+2s 之间
+	reset, err := strconv.ParseInt(string(w.Header().Peek(headerRateLimitReset)), 10, 64)
+	if err != nil {
+		t.Fatalf("X-RateLimit-Reset not a unix timestamp: %v", err)
+	}
+	if reset < before || reset > time.Now().Unix()+2 {
+		t.Errorf("X-RateLimit-Reset = %d, want ≈ now+1s (quota restore moment)", reset)
+	}
+}
+
 // itoa 是测试内的小工具：timeout_ms 数值拼进配置 JSON 用。
 func itoa(n int) string {
 	return strconv.Itoa(n)
