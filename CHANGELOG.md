@@ -1,3 +1,9 @@
+## [v0.14.1] — 2026-11-21
+
+- - fix: crudh Delete 级联钩子调用 del(ctx) 后返回 nil 时主删除错误不再丢失——仍受 DeleteFoundPolicy 约束（#353）
+
+关联问题单：hertz#353。
+
 ## [v0.14.0] — 2026-11-20
 
 - fix(governance): govhertz 限流拒绝改走 mw.ErrorResp 信封（code/message/trace_id/Abort 与 mw.RateLimitMiddleware 同源）+ Retry-After/X-RateLimit-Reset 锁内结算——此前裸 AbortWithStatus(429) 空体无重试头，同进程双限流两轨响应面（#343）
