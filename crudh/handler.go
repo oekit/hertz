@@ -363,17 +363,26 @@ func (h *Handler[T, ID, C, U]) Delete(ctx context.Context, c *app.RequestContext
 	}
 
 	// del 是主记录删除执行器：级联钩子可调用它决定删除时机（可在消费方事务内调用）。
+	// delErr 保存执行器结果：#353 钩子调用 del 后返回 nil 时，主删除错误不能
+	// 被钩子的 nil 吞掉，仍从统一错误出口出参（并受 DeleteFoundPolicy 约束）。
 	delCalled := false
+	var delErr error
 	del := func(dctx context.Context) error {
 		delCalled = true
-		return h.svc.Delete(dctx, id)
+		delErr = h.svc.Delete(dctx, id)
+		return delErr
 	}
 
 	var deleteErr error
 	if h.deleteCascade != nil {
 		deleteErr = h.deleteCascade(ctx, c, id, del)
 	}
-	if deleteErr == nil && !delCalled {
+	switch {
+	case deleteErr != nil:
+		// 级联钩子自身错误优先出参（与历史行为一致）。
+	case delCalled:
+		deleteErr = delErr
+	default:
 		deleteErr = del(ctx)
 	}
 
