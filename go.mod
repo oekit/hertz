@@ -6,7 +6,7 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/authx v0.13.0
+	github.com/oekit/authx v0.14.0
 	github.com/oekit/bootstrap v0.7.14
 	github.com/oekit/concurrency v0.40.0
 	github.com/oekit/core v0.18.0
@@ -15,7 +15,7 @@ require (
 	github.com/oekit/metrics v0.4.3
 	github.com/oekit/middleware v0.23.0
 	github.com/oekit/nns v0.10.1
-	github.com/oekit/pkg v0.59.0
+	github.com/oekit/pkg v0.60.0
 	github.com/oekit/registry v0.8.3
 	github.com/oekit/registry/nacos v0.2.0
 	github.com/oekit/tracing v0.4.8
