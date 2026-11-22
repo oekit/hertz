@@ -206,6 +206,8 @@ github.com/nacos-group/nacos-sdk-go/v2 v2.3.6 h1:yJFBWOKbNntdO+a703QShiqAefOFSY6
 github.com/nacos-group/nacos-sdk-go/v2 v2.3.6/go.mod h1:ygUBdt7eGeYBt6Lz2HO3wx7crKXk25Mp80568emGMWU=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nyaruka/phonenumbers v1.0.55/go.mod h1:sDaTZ/KPX5f8qyV9qN+hIm+4ZBARJrupC6LuhshJq1U=
+github.com/oekit/authx v0.14.0 h1:rEeLkBXq+j15q18BZmdmi7PBDhIsFWW0U9JQm5YHRTo=
+github.com/oekit/authx v0.14.0/go.mod h1:kKqC0k3A+mdI92D1cGDW4y/g4X0dhB0Bl66OKKPoZGY=
 github.com/oekit/bootstrap v0.7.14 h1:4cWRyrYwKJxBj03PUatV1Fca7We03G7TEk+T/WSZowE=
 github.com/oekit/bootstrap v0.7.14/go.mod h1:aRWhfkoj+4C1DFLvgCGdJzprQlZIdl+UopEPTBe93c8=
 github.com/oekit/concurrency v0.40.0 h1:gFwginpsVXdY4R/hzwicyBa2u1WHmCN1h5Bw6ztlpBw=
@@ -214,8 +216,6 @@ github.com/oekit/core v0.18.0 h1:NMRR5wwmDJvlQJSDTx9ppUt+EUhdVavDTue4/UiQLpE=
 github.com/oekit/core v0.18.0/go.mod h1:1GqGty9VMvHqtrxgxmXiCcVRN4jy9QVLbr/ifVWHeaA=
 github.com/oekit/gormx v0.14.1 h1:O+DhC7tVXLB4A9EUbJq3T+/FaQhmxyiCkq2DaYpdzhU=
 github.com/oekit/gormx v0.14.1/go.mod h1:1V73OSwuEP04nHwPoG/au14U8fiA8pTmhJQ97LgHkSo=
-github.com/oekit/kitx v0.13.0 h1:V603rpIVGrEh/JAxh2cLJIrsN2rICH9YsnB9e0eP5GA=
-github.com/oekit/kitx v0.13.0/go.mod h1:LnxE1Er+7rkYpHi2lHaCQLBisGuJJDfCtm+/Hs/17/8=
 github.com/oekit/logx v0.12.1 h1:7vYBKiImDcCDqEXwl8BrQSp29MvFSBUOWFTPm33fw8s=
 github.com/oekit/logx v0.12.1/go.mod h1:aIxiaegg9jzyvXhGXNcjq7ljAdVC2ERUCHqGN+thui0=
 github.com/oekit/logx/hlog v0.1.12 h1:FbdQl38geSN5947yjHKe/pTLOb/2JPEVBuyrRhNl+Yk=
