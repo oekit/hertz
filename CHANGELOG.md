@@ -1,3 +1,7 @@
+## [v0.14.2] — 2026-11-23
+
+- build: 依赖地板对齐（矩阵地板波次）——新地板：github.com/oekit/authx v0.14.0 github.com/oekit/pkg v0.60.0 。零行为变化；已发布产物的 go.mod 地板此前滞后于矩阵登记版本，本版把新地板焊进已发布产物。
+
 ## [v0.14.1] — 2026-11-21
 
 - - fix: crudh Delete 级联钩子调用 del(ctx) 后返回 nil 时主删除错误不再丢失——仍受 DeleteFoundPolicy 约束（#353）
