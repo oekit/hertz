@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/test/assert"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/cloudwego/hertz/pkg/route/param"
-	"github.com/oekit/kitx/validator"
+	"github.com/oekit/authx/validator"
 )
 
 type queryForm struct {
