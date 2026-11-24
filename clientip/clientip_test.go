@@ -11,6 +11,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/client"
 	"github.com/cloudwego/hertz/pkg/common/config"
+	"github.com/cloudwego/hertz/pkg/common/test/mock"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/cloudwego/hertz/pkg/route"
 
@@ -564,5 +565,61 @@ func BenchmarkGetClientIP_ParseEveryRequest(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		_ = convert.ResolveClientIP(remoteAddr(c), c.Request.Header.Get("X-Forwarded-For"), benchList)
+	}
+}
+
+// --- #297 回归：unix 域套接字对端归一为回环 ---
+
+// remoteAddrConn 是只定制 RemoteAddr 的 network.Conn 测试桩（unix 对端构造用）。
+type remoteAddrConn struct {
+	*mock.Conn
+	remote net.Addr
+}
+
+func (c *remoteAddrConn) RemoteAddr() net.Addr { return c.remote }
+
+// newUnixPeerContext 构造对端为 unix 域套接字的请求上下文。
+func newUnixPeerContext(network string) *app.RequestContext {
+	c := app.NewContext(0)
+	c.SetConn(&remoteAddrConn{
+		Conn:   &mock.Conn{},
+		remote: &net.UnixAddr{Name: "@", Net: network},
+	})
+	return c
+}
+
+// TestGetClientIP_UnixSocketPeer 回归 #297：unix 对端的 RemoteAddr().String()
+// 是 socket 路径（"@"），此前被原样当成客户端 IP 返回。与 hertz 缺省语义
+// 对齐后必须归一为 127.0.0.1（并作为回环参与可信代理判定）。
+func TestGetClientIP_UnixSocketPeer(t *testing.T) {
+	for _, network := range []string{"unix", "unixgram", "unixpacket"} {
+		t.Run(network, func(t *testing.T) {
+			// 验收判据：默认可信代理 + 无代理头 ⇒ 127.0.0.1（此前为 "@"）。
+			c := newUnixPeerContext(network)
+			if got := GetClientIPWithDefaultProxies(c); got != "127.0.0.1" {
+				t.Errorf("default proxies, no XFF: clientip = %q, want 127.0.0.1", got)
+			}
+
+			// 归一为回环后默认可信网段（含 127.0.0.0/8）采信 XFF——
+			// 与 hertz 缺省「unix 对端按回环信任」一致。
+			c.Request.Header.Set("X-Forwarded-For", "9.9.9.9, 1.2.3.4")
+			if got := GetClientIPWithDefaultProxies(c); got != "1.2.3.4" {
+				t.Errorf("default proxies, XFF: clientip = %q, want 1.2.3.4 (unix peer trusted as loopback)", got)
+			}
+
+			// 显式清单不含回环：对端不可信 ⇒ XFF 不采信，仍返回归一的回环。
+			if got := GetClientIP(c, []string{"10.0.0.0/8"}); got != "127.0.0.1" {
+				t.Errorf("untrusted list: clientip = %q, want 127.0.0.1 (never the socket path)", got)
+			}
+
+			// Resolver 形态同样吃到归一（内部共用 remoteAddr）。
+			r, err := New([]string{"127.0.0.0/8"})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if got := r.GetClientIP(c); got != "1.2.3.4" {
+				t.Errorf("Resolver: clientip = %q, want 1.2.3.4", got)
+			}
+		})
 	}
 }

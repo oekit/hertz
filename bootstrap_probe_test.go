@@ -212,25 +212,14 @@ func TestRunServer_ReadyProbeTimeoutStillShutsDown(t *testing.T) {
 	}
 }
 
-// TestCallOnReady_PanicBecomesError #152 单元面：callOnReady 把 panic 转为
-// 可判别 error（探活失败链的入口），正常回调零影响。
-func TestCallOnReady_PanicBecomesError(t *testing.T) {
-	err := callOnReady("svc-x", func(context.Context) { panic("registration backend exploded") },
-		context.Background())
-	if err == nil || !strings.Contains(err.Error(), "onReady panicked") ||
-		!strings.Contains(err.Error(), "registration backend exploded") {
-		t.Fatalf("callOnReady err = %v, want panic converted to error", err)
-	}
-	if err := callOnReady("svc-x", func(context.Context) {}, context.Background()); err != nil {
-		t.Fatalf("normal onReady must not error: %v", err)
-	}
-}
-
 // TestRunServer_OnReadyPanicShutsDown #152 回归（issue 探针原样）：探活通过后
 // onReady panic 不得被 async.GoSafe 静默吞掉——修复前 panic 沿 probeAndReady
 // 展开，外层闭包的「探活失败 ⇒ RequestShutdown」处置整段被跳过 ⇒ server 以
 // 「探活已过、回调丢失、永不注册」的半启动形态继续 serve。修复后 panic 在
 // probeAndReady 内转为 error，走探活失败语义：ERROR + RequestShutdown。
+// （#208 后 panic→error 收编单源在 lifecycle.ReadyProbe.Run 内部，本仓本地
+// callOnReady 帮助函数及其单元面随探活骨架下沉删除；语义由 core 的
+// ready_probe_test.go 与本回归用例共同覆盖。）
 func TestRunServer_OnReadyPanicShutsDown(t *testing.T) {
 	cap := installCapturingLogger(t)
 

@@ -3,9 +3,11 @@ package nns
 import (
 	"context"
 	"fmt"
+	"time"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	nnsclient "github.com/oekit/nns/client"
+	"github.com/oekit/pkg/errors"
 	ereg "github.com/oekit/registry"
 	"github.com/oekit/registry/sdbridge"
 )
@@ -20,8 +22,11 @@ import (
 // 没有 ctx 形参，本类型额外提供带 ctx 的
 // [Registry.RegisterContext] / [Registry.DeregisterContext]。
 type Registry struct {
-	client        *nnsclient.ServiceClient
-	defaultWeight int
+	client             *nnsclient.ServiceClient
+	defaultWeight      int
+	defaultServiceName string
+	registerTimeout    time.Duration
+	deregisterTimeout  time.Duration
 }
 
 var _ hregistry.Registry = (*Registry)(nil)
@@ -42,9 +47,41 @@ var _ ContextRegistry = (*Registry)(nil)
 type RegistryOption func(*Registry)
 
 // WithDefaultWeight 设置当 Hertz Info.Weight 为 0 时使用的默认权重。
-// 默认值 10（与 Hertz [ereg.DefaultWeight] 一致）。
+// 默认值 [ereg.DefaultInstanceWeight]（10，#214 常量收口）。
 func WithDefaultWeight(w int) RegistryOption {
 	return func(r *Registry) { r.defaultWeight = w }
+}
+
+// WithDefaultServiceName 设置当 Hertz Info.ServiceName 为空时使用的兜底
+// 服务名（#336，对齐 kitex/nns 三级兜底口径）：兜底顺序为显式本项 →
+// ServiceClient Init 声明的自身服务名（GetLocalService）。均为空时保持
+// fail-closed（原报错语义不变）。
+func WithDefaultServiceName(name string) RegistryOption {
+	return func(r *Registry) { r.defaultServiceName = name }
+}
+
+// WithRegisterTimeout 设置 Register 的单次预算（#336，对齐 kitex/nns #212
+// 口径）。缺省 3s（[sdbridge.DefaultRegisterBudget]）。d <= 0 构造期 panic
+// （fail-fast：预算是防拖死启动序列的护栏，非法值静默接受等于没护栏）。
+func WithRegisterTimeout(d time.Duration) RegistryOption {
+	return func(r *Registry) {
+		if d <= 0 {
+			panic(fmt.Sprintf("nns-hertz registry: WithRegisterTimeout requires d > 0, got %v", d))
+		}
+		r.registerTimeout = d
+	}
+}
+
+// WithDeregisterTimeout 设置 Deregister 的单次预算（#336，对齐 kitex/nns
+// #212 口径）。语义与约束同 [WithRegisterTimeout]；本预算应小于 bootstrap
+// 给关停 closer 的超时——跨地域注册中心/慢网络下缺省 3s 不够时由此调宽。
+func WithDeregisterTimeout(d time.Duration) RegistryOption {
+	return func(r *Registry) {
+		if d <= 0 {
+			panic(fmt.Sprintf("nns-hertz registry: WithDeregisterTimeout requires d > 0, got %v", d))
+		}
+		r.deregisterTimeout = d
+	}
 }
 
 // degraded 消息正文（#217 收敛前 Register/Deregister 两段各写一份，仅此
@@ -68,6 +105,14 @@ const (
 // client 为 nil 时 panic——与同包 [NewInstanceWatcher] 的 nil discoverer
 // 口径一致（构造期配置错误，启动即暴露），避免运行期空指针。
 //
+// ⚠️ 此处的 nil fail-fast 保留手写 `c == nil` 判定、不改收口
+// [sdbridge.EnsureNotNil]（#216）：EnsureNotNil 仅检接口层面的 nil，本参数
+// 是具体类型 *nnsclient.ServiceClient——类型化 nil 指针装箱进 any 后
+// `dep == nil` 恒为 false（EnsureNotNil 文档明示的范围外），照搬会静默放行
+// nil client、把 panic 拖到运行期空指针，恰是 #219 要消灭的形态。参数为
+// 接口类型的构造器（hertz/registry.NewRegistry 的 ereg.Registrar）才走
+// EnsureNotNil 单源。
+//
 // ⚠️ 返回类型由 [hregistry.Registry] 接口改为具体类型 *Registry（仍实现该
 // 接口，赋值/传参不受影响）：为的是让带 ctx 的注册方法可直接调用。
 func NewRegistry(c *nnsclient.ServiceClient, opts ...RegistryOption) *Registry {
@@ -75,8 +120,10 @@ func NewRegistry(c *nnsclient.ServiceClient, opts ...RegistryOption) *Registry {
 		panic("hertz: NewRegistry requires non-nil client")
 	}
 	r := &Registry{
-		client:        c,
-		defaultWeight: 10,
+		client:            c,
+		defaultWeight:     int(ereg.DefaultInstanceWeight),
+		registerTimeout:   sdbridge.DefaultRegisterBudget,
+		deregisterTimeout: sdbridge.DefaultRegisterBudget,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -87,15 +134,24 @@ func NewRegistry(c *nnsclient.ServiceClient, opts ...RegistryOption) *Registry {
 // Register 将 Hertz 服务实例注册到 NNS 注册中心。
 //
 // Hertz 的 [hregistry.Registry] 接口没有 ctx 形参（engine 在 Spin 时调用），
-// 故此处用 context.Background()；需要 ctx 的场景用 [Registry.RegisterContext]。
+// 单次预算（#317，kitex #212 的 hertz 孪生）收口单源
+// [sdbridge.RegisterWithBudget]（#216 消费，删手写 WithTimeout 拷贝）——
+// 注册中心不可达时最多阻塞缺省预算 sdbridge.DefaultRegisterBudget（3s），
+// 不再无界阻塞；需要自定义预算/取消的场景用 [Registry.RegisterContext]。
 func (r *Registry) Register(info *hregistry.Info) error {
-	return r.RegisterContext(context.Background(), info)
+	inst, err := r.buildInstance(info)
+	if err != nil {
+		return err
+	}
+	return r.applyRegistrar(degradedRegisterMsg, func(reg ereg.Registrar) error {
+		return sdbridge.RegisterWithBudget(context.Background(), reg, inst, r.registerTimeout)
+	})
 }
 
 // RegisterContext 与 [Registry.Register] 同语义，但显式传入 ctx
 // （可取消/可超时）。
 func (r *Registry) RegisterContext(ctx context.Context, info *hregistry.Info) error {
-	inst, err := buildInstance(info, r.defaultWeight)
+	inst, err := r.buildInstance(info)
 	if err != nil {
 		return err
 	}
@@ -107,14 +163,22 @@ func (r *Registry) RegisterContext(ctx context.Context, info *hregistry.Info) er
 // Deregister 从 NNS 注册中心注销 Hertz 服务实例。
 // 与 Register 对称：保留 tags 并走 defaultWeight 兜底，
 // 依赖 metadata/权重匹配的注册中心才能正确注销。
+// 优雅关停路径的单次预算（#317）收口单源 [sdbridge.DeregisterWithBudget]
+// （#216 消费）：注册中心不可达时最多阻塞缺省预算（3s），不再拖死关停序列。
 func (r *Registry) Deregister(info *hregistry.Info) error {
-	return r.DeregisterContext(context.Background(), info)
+	inst, err := r.buildInstance(info)
+	if err != nil {
+		return err
+	}
+	return r.applyRegistrar(degradedDeregisterMsg, func(reg ereg.Registrar) error {
+		return sdbridge.DeregisterWithBudget(context.Background(), reg, inst, r.deregisterTimeout)
+	})
 }
 
 // DeregisterContext 与 [Registry.Deregister] 同语义，但显式传入 ctx
 // （可取消/可超时）。
 func (r *Registry) DeregisterContext(ctx context.Context, info *hregistry.Info) error {
-	inst, err := buildInstance(info, r.defaultWeight)
+	inst, err := r.buildInstance(info)
 	if err != nil {
 		return err
 	}
@@ -124,17 +188,37 @@ func (r *Registry) DeregisterContext(ctx context.Context, info *hregistry.Info) 
 }
 
 // buildInstance 把 Hertz Info 转为 ereg.Instance（#217 收敛 Register/
-// DeregisterContext 的共同前段）：info==nil 拒绝；weight<=0 时由 weight
-// 兜底参数（defaultWeight）兜底（委托 sdbridge.ToInstance）。
-func buildInstance(info *hregistry.Info, weight int) (ereg.Instance, error) {
+// DeregisterContext 的共同前段；#336 改为方法以取 resolveServiceName）：
+// info==nil 拒绝；weight<=0 由 defaultWeight 兜底；ServiceName 空串走
+// resolveServiceName 兜底链（委托 sdbridge.ToInstance）。
+func (r *Registry) buildInstance(info *hregistry.Info) (ereg.Instance, error) {
 	if info == nil {
-		return ereg.Instance{}, fmt.Errorf("nns-hertz registry: info is nil")
+		return ereg.Instance{}, errors.New("nns-hertz registry: info is nil")
 	}
-	inst, err := sdbridge.ToInstance(info.ServiceName, info.Addr, info.Weight, weight, info.Tags)
+	inst, err := sdbridge.ToInstance(r.resolveServiceName(info.ServiceName), info.Addr, info.Weight, r.defaultWeight, info.Tags)
 	if err != nil {
-		return ereg.Instance{}, fmt.Errorf("nns-hertz registry: %w", err)
+		return ereg.Instance{}, errors.Wrapf(err, "nns-hertz registry")
 	}
 	return inst, nil
+}
+
+// resolveServiceName 对空服务名兜底（#336，与 kitex/nns #93 同款三级链）：
+// hertz server 未显式配服务名时 Info.ServiceName 为空串，而
+// sdbridge.ToInstance 对空名硬报 "registry: service name is empty"
+// （fail-closed 保留）。兜底顺序：显式 WithDefaultServiceName →
+// ServiceClient Init 声明的自身服务名（LocalServiceInit 记录，经
+// GetLocalService 可见）。均为空时返回空串（保持 fail-closed）。
+func (r *Registry) resolveServiceName(name string) string {
+	if name != "" {
+		return name
+	}
+	if r.defaultServiceName != "" {
+		return r.defaultServiceName
+	}
+	if ls := r.client.GetLocalService(); ls != nil {
+		return ls.ServiceName.FullName
+	}
+	return ""
 }
 
 // applyRegistrar 解析当前生效的 registrar 并执行 apply（#217 收敛
@@ -152,7 +236,7 @@ func (r *Registry) applyRegistrar(degradedMsg string, apply func(reg ereg.Regist
 		if r.client.MockMode() {
 			return nil // mock 模式：静默跳过
 		}
-		return fmt.Errorf("nns-hertz registry: %s", degradedMsg)
+		return errors.Newf("nns-hertz registry: %s", degradedMsg)
 	}
 	return apply(reg)
 }

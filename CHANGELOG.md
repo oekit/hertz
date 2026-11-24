@@ -1,3 +1,73 @@
+## [v0.14.2] — 2026-11-23
+
+- build: 依赖地板对齐（矩阵地板波次）——新地板：github.com/oekit/authx v0.14.0 github.com/oekit/pkg v0.60.0 。零行为变化；已发布产物的 go.mod 地板此前滞后于矩阵登记版本，本版把新地板焊进已发布产物。
+
+## [v0.14.1] — 2026-11-21
+
+- - fix: crudh Delete 级联钩子调用 del(ctx) 后返回 nil 时主删除错误不再丢失——仍受 DeleteFoundPolicy 约束（#353）
+
+关联问题单：hertz#353。
+
+## [v0.14.0] — 2026-11-20
+
+- fix(governance): govhertz 限流拒绝改走 mw.ErrorResp 信封（code/message/trace_id/Abort 与 mw.RateLimitMiddleware 同源）+ Retry-After/X-RateLimit-Reset 锁内结算——此前裸 AbortWithStatus(429) 空体无重试头，同进程双限流两轨响应面（#343）
+docs(chainmw): Wrap godoc 补警示——链内不得放 core/chain.Timeout（硬掐断被弃 goroutine 与 Wrap 侧 Fail 双写同一响应缓冲）；hertz 链超时治理走 hertz/governance（#343）
+⚠ 行为面：govhertz 拒绝响应由空体 429 变为 JSON 信封+Retry-After（HTTP 状态码不变）
+
+## [v0.13.0] — 2026-11-19
+
+- 第二轮重复逻辑深挖审计（2026-11-19）hertz 修复与能力面对齐：
+
+- fix: InstancesToHertz 权重改先 int 截断再 WeightOrDefault 回填——旧顺序先判定后截断会把 (0,1) 区间小数权重（float64，nacos 可配）截成 0 透传，违反「转换产物权重恒为正」godoc 契约（kitex #92 修法的 hertz 侧落地），补小数权重回归用例（#335）
+- feat: registry 与 nns 两 adapter 补 WithRegisterTimeout/WithDeregisterTimeout（d<=0 构造期 panic，对齐 kitex #191/#212 口径——跨地域注册中心/慢网络下缺省 3s 硬编码无解）与 WithDefaultServiceName（nns 侧三级兜底链：显式 → GetLocalService → fail-closed 保留，对齐 kitex #93）（#336）
+- refactor: 两 adapter defaultWeight 裸 10 接 ereg.DefaultInstanceWeight（#214 权重维度闭合）；bootstrap h.Run() 失败日志补 name 字段（多 server 进程定位）（#336）
+
+关联问题单：hertz#335、hertz#336。
+
+## [v0.12.8] — 2026-11-18
+
+- 地板对齐 middleware v0.21.0(GatewayTrustPresented 导出)
+
+## [v0.12.7] — 2026-11-18
+
+- 三项单源消费:RunServer 探活骨架委托 core/lifecycle.ReadyProbe(core#208 下沉件,本地 dial 循环/超时/哨兵副本删除);InstanceWatcher 改 registry/instancewatcher 薄 re-export(#319 归位收尾);四 adapter 接入 sdbridge 注册预算/权重兜底/nil fail-fast 单源(#216 收尾);行为与导出面不变,地板 core v0.17.0/registry v0.8.0
+
+## [v0.12.6] — 2026-11-18
+
+- health checker panic 走 pkg/errors.Recovered 收编(#182 口径,#316);registry/nns adapter Register/Deregister 补 3s 超时预算,注册中心不可达不再无界阻塞/拖死优雅关停(kitex#191/#212 孪生,#317);InstancesToHertz weight<=0 回填 DefaultWeight(kitex#92 孪生,#318);health DegradedError 收敛 pkg/errors 单源(pkg v0.53.0)
+
+关联问题单：hertz#316、hertz#317、hertz#318。
+
+## [v0.12.5] — 2026-11-16
+
+- refactor: fmt.Errorf → oekit/pkg/errors 三形态对位替换（#520 替换波）+ 依赖地板抬至最新已发布
+
+## [v0.12.4] — 2026-11-16
+
+- - hertz/sse 的游标/回放内核改为消费 oekit/pkg v0.51.0 导出面（`ParseCursor`/`ReplaySince`/`Cursor`）：删除本地 parseCursor 副本，「先订阅后回放」去重/非法游标 400/慢消费者断流语义与 net/http Responder 单源一致；新增掉队重连按游标续传用例（#302 follow-up）。
+- 依赖地板对齐：concurrency v0.38.0 / kitx v0.10.0（发版前置，无代码变更）。
+
+关联问题单：hertz#302。
+
+## [v0.12.3] — 2026-11-15
+
+- fix: clientip.remoteAddr 对 unix socket 对端归一为 127.0.0.1（与缺省回环口径对齐，#297）；metrics 便捷入口新增 WithExtraGatherers 接入外部 Registry（promauto/DefaultGatherer 用户不再黑洞），unionGatherer 同名整族去重+每名 WARN 一次（#298）
+
+关联问题单：hertz#297、hertz#298。
+
+## [v0.12.2] — 2026-11-15
+
+- hertztracer 配对判据与链路推进兜底（#288）：交权上游改为 TraceInfo 非 nil 且已配对安装（serverTracerCreated 置位判据），上游早退时 GetIndex 比对落回自建 span，混合装配不再截断链路
+- chainmw 尊重 c.Abort()（#289）：适配 handler Abort 后整条 chain 链（含 terminal）终止，状态保持
+- CSV render 类型注释与 struct 展开（#290）：注释改指真实入口 NewCSVFromAny，struct/*struct 行反射展开（导出字段逐列、指针 nil→空串、不自动加表头）
+- governance 构造期拒绝 nil Store（#291）：NewLimiterMiddleware/NewTimeoutMiddleware fail-fast panic，与 nns/registry/metrics 同口径
+
+关联问题单：hertz#288、hertz#289、hertz#290、hertz#291。
+
+## [v0.12.1] — 2026-11-14
+
+- chore(deps): 依赖地板追平——middleware v0.19.2(随 any 现代化版)
+
 ## [v0.12.0] — 2026-11-13
 
 - **BREAKING**：删除 hertztracer.ServerOption 历史类型别名（#247 改名 TracerOption 时冻结保留的兼容面，本次三 org 兼容清仓显式解除冻结承诺）。下游迁移：ServerOption → TracerOption（同型纯改名）。命名红线不变：函数选项禁止裸 Option（与 hertz 公共配置包 co-import 冲突的根因）。地板随迁 metrics v0.4.0 / pkg v0.48.0。

@@ -448,3 +448,47 @@ func TestDeleteCascade_NotFoundUnderSuccessPolicy(t *testing.T) {
 	assert.DeepEqual(t, consts.StatusOK, w.Code)
 	assert.DeepEqual(t, `{"code":0,"data":null,"message":"success","trace_id":""}`, w.Body.String())
 }
+
+// TestDeleteCascade_SwallowedExecutorErrorSurfaces 回归 #353：级联钩子调用
+// 删除执行器后返回 nil（最自然的前置级联写法）时，执行器错误不能被吞——
+// 主删除错误经统一出口出参。
+func TestDeleteCascade_SwallowedExecutorErrorSurfaces(t *testing.T) {
+	svc := newSpyItemService()
+	svc.deleteErr = bizerrors.NewBizError(500, "主删除失败")
+	h := NewHandler[Item, int64, CreateItemReq, UpdateItemReq](svc,
+		WithDeleteCascade[Item, int64, CreateItemReq, UpdateItemReq](
+			func(ctx context.Context, _ *app.RequestContext, _ int64, del func(context.Context) error) error {
+				svc.record("cascade")
+				_ = del(ctx) // 吞掉执行器返回值
+				return nil
+			}))
+	engine := newEngineWith(t, h, "/items")
+
+	w := doJSON(t, engine, consts.MethodDelete, "/api/items/7", "")
+	resp := decodeEnvelope(t, w)
+	assert.DeepEqual(t, 500, resp.Code)
+	assert.DeepEqual(t, "主删除失败", resp.Message)
+
+	_, deleteCalls, _, events := svc.snapshot()
+	assert.DeepEqual(t, 1, deleteCalls)
+	assert.DeepEqual(t, []string{"cascade", "delete"}, events)
+}
+
+// TestDeleteCascade_SwallowedExecutorNotFoundUnderSuccessPolicy 回归 #353：
+// 被钩子吞掉的「记录不存在」错误同样受 found 策略约束（幂等口径下按成功出参）。
+func TestDeleteCascade_SwallowedExecutorNotFoundUnderSuccessPolicy(t *testing.T) {
+	svc := newSpyItemService()
+	svc.deleteErr = crud.ErrNotFound
+	h := NewHandler[Item, int64, CreateItemReq, UpdateItemReq](svc,
+		WithDeleteFoundPolicy[Item, int64, CreateItemReq, UpdateItemReq](DeleteFoundSuccess),
+		WithDeleteCascade[Item, int64, CreateItemReq, UpdateItemReq](
+			func(ctx context.Context, _ *app.RequestContext, _ int64, del func(context.Context) error) error {
+				_ = del(ctx)
+				return nil
+			}))
+	engine := newEngineWith(t, h, "/items")
+
+	w := doJSON(t, engine, consts.MethodDelete, "/api/items/999", "")
+	assert.DeepEqual(t, consts.StatusOK, w.Code)
+	assert.DeepEqual(t, `{"code":0,"data":null,"message":"success","trace_id":""}`, w.Body.String())
+}

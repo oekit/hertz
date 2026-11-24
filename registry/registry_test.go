@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app/client/discovery"
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
@@ -233,7 +234,7 @@ func TestToInstance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			inst, err := toInstance(tt.info, tt.defaultWeight)
+			inst, err := toInstance(tt.info, tt.defaultWeight, "")
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("toInstance() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -253,5 +254,94 @@ func TestToInstance(t *testing.T) {
 				t.Errorf("Weight = %f, want %f", inst.Weight, tt.wantWeight)
 			}
 		})
+	}
+}
+
+// ctxCapturingRegistrar 捕获 Register/Deregister 收到的 ctx——用于钉 #317：
+// 接口层补的 WithTimeout(Background) 预算必须真正传到底层 Registrar。
+type ctxCapturingRegistrar struct {
+	regCtx     context.Context
+	deregCtx   context.Context
+	regCalls   int
+	deregCalls int
+}
+
+func (c *ctxCapturingRegistrar) Register(ctx context.Context, _ ereg.Instance) error {
+	c.regCalls++
+	c.regCtx = ctx
+	return nil
+}
+
+func (c *ctxCapturingRegistrar) Deregister(ctx context.Context, _ ereg.Instance) error {
+	c.deregCalls++
+	c.deregCtx = ctx
+	return nil
+}
+
+// TestRegistry_Register_TimeoutBudget 钉 #317（kitex/kitex #191 的 hertz 孪生）：
+// Register/Deregister 的 ctx 带缺省 3s 预算（defaultRegisterTimeout），不再是
+// 无截止的 Background——注册中心不可达时最多阻塞预算时长，不拖死优雅关停。
+func TestRegistry_Register_TimeoutBudget(t *testing.T) {
+	creg := &ctxCapturingRegistrar{}
+	r := NewRegistry(creg)
+
+	info := &hregistry.Info{ServiceName: "budget-svc", Addr: &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080}}
+	if err := r.Register(info); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if err := r.Deregister(info); err != nil {
+		t.Fatalf("Deregister() error = %v", err)
+	}
+
+	if creg.regCtx == nil {
+		t.Fatal("Register must reach the registrar with a ctx")
+	}
+	if dl, ok := creg.regCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
+		t.Errorf("Register ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
+	}
+	if creg.deregCtx == nil {
+		t.Fatal("Deregister must reach the registrar with a ctx")
+	}
+	if dl, ok := creg.deregCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
+		t.Errorf("Deregister ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
+	}
+}
+
+// TestRegistryOptions_TimeoutFailFast #336 回归：预算选项 d<=0 构造期 panic
+// （对齐 kitex #191/#212 口径——预算是护栏，非法值静默接受等于没护栏）。
+func TestRegistryOptions_TimeoutFailFast(t *testing.T) {
+	for name, opt := range map[string]RegistryOption{
+		"WithRegisterTimeout":   WithRegisterTimeout(0),
+		"WithDeregisterTimeout": WithDeregisterTimeout(-time.Second),
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s(d<=0) 必须 panic（构造期 fail-fast）", name)
+				}
+			}()
+			opt(&hertzRegistry{})
+		})
+	}
+}
+
+// TestRegistry_DefaultServiceNameFallback #336 回归：Info.ServiceName 空串时
+// 用 WithDefaultServiceName 兜底；不设置时保持 fail-closed（报 service name
+// is empty）。
+func TestRegistry_DefaultServiceNameFallback(t *testing.T) {
+	// 兜底生效：注册成功且实例带上兜底名。
+	mock := &registrymocks.Registrar{}
+	r := NewRegistry(mock, WithDefaultServiceName("fallback-svc"))
+	fallbackAddr := &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080}
+	if err := r.Register(&hregistry.Info{Addr: fallbackAddr}); err != nil {
+		t.Fatalf("空 ServiceName + 兜底名应注册成功: %v", err)
+	}
+	if got := mock.Registered[0].Service; got != "fallback-svc" {
+		t.Fatalf("ServiceName = %q, want fallback-svc", got)
+	}
+	// fail-closed 保留：无兜底时空名硬报。
+	r2 := NewRegistry(&registrymocks.Registrar{})
+	if err := r2.Register(&hregistry.Info{Addr: fallbackAddr}); err == nil {
+		t.Fatal("空 ServiceName 无兜底必须报错（fail-closed 保留）")
 	}
 }

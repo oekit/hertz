@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	hregistry "github.com/cloudwego/hertz/pkg/app/server/registry"
 	nnsclient "github.com/oekit/nns/client"
@@ -172,9 +173,83 @@ func TestRegistry_RegisterContext_PassesCtx(t *testing.T) {
 	}
 }
 
+// TestRegistry_Register_TimeoutBudget 钉 #317（kitex/nns-kitex #212 的 hertz
+// 孪生）：无 ctx 变体的 Register/Deregister 不再裸传 context.Background()，
+// 底层 Registrar 拿到的 ctx 必须带缺省 3s 预算（defaultRegisterTimeout）——
+// 注册中心不可达时最多阻塞预算时长，不再无界阻塞/拖死优雅关停。
+func TestRegistry_Register_TimeoutBudget(t *testing.T) {
+	fr := &ctxRecordingRegistrar{}
+	nnsc := nnsclient.New(nnsclient.WithRegistrar(fr))
+	defer nnsc.Close()
+
+	reg := NewRegistry(nnsc)
+
+	info := &hregistry.Info{
+		ServiceName: "budget-svc",
+		Addr:        &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080},
+	}
+	if err := reg.Register(info); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if err := reg.Deregister(info); err != nil {
+		t.Fatalf("Deregister() error = %v", err)
+	}
+
+	regCtx, deregCtx := fr.snapshot()
+	if regCtx == nil {
+		t.Fatal("Register must reach the registrar with a ctx")
+	}
+	if deregCtx == nil {
+		t.Fatal("Deregister must reach the registrar with a ctx")
+	}
+	// 预算为缺省 3s：截止时间必须在未来且不超过 3s+余量窗口。
+	if dl, ok := regCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
+		t.Errorf("Register ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
+	}
+	if dl, ok := deregCtx.Deadline(); !ok || dl.Before(time.Now()) || time.Until(dl) > 4*time.Second {
+		t.Errorf("Deregister ctx deadline not in (0, 3s+slack] window, dl = %v, ok = %v", dl, ok)
+	}
+}
+
 // TestRegistry_ImplementsContextRegistry 静态断言：Registry 同时满足 hertz
 // 的 registry.Registry 与本包的 ContextRegistry（带 ctx 的扩展点）。
 func TestRegistry_ImplementsContextRegistry(t *testing.T) {
 	var _ hregistry.Registry = (*Registry)(nil)
 	var _ ContextRegistry = (*Registry)(nil)
+}
+
+// TestNnsRegistry_TimeoutOptions_FailFastAndPassthrough #336 回归：预算选项
+// d<=0 构造期 panic（对齐 kitex/nns #212 口径）；配置的预算真正传到
+// DeregisterWithBudget（ctx deadline 可见）。
+func TestNnsRegistry_TimeoutOptions_FailFastAndPassthrough(t *testing.T) {
+	fr := &registrymocks.Registrar{}
+	c := nnsclient.New(nnsclient.WithRegistrar(fr))
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("WithRegisterTimeout(0) 必须 panic（构造期 fail-fast）")
+		}
+	}()
+	_ = NewRegistry(c, WithRegisterTimeout(0))
+}
+
+// TestNnsRegistry_DefaultServiceNameFallback #336 回归：Info.ServiceName
+// 空串时 WithDefaultServiceName 兜底生效；无兜底保持 fail-closed。
+func TestNnsRegistry_DefaultServiceNameFallback(t *testing.T) {
+	fr := &registrymocks.Registrar{}
+	c := nnsclient.New(nnsclient.WithRegistrar(fr))
+
+	addr := &net.TCPAddr{IP: net.ParseIP("10.0.0.1"), Port: 8080}
+	r := NewRegistry(c, WithDefaultServiceName("fallback-svc"))
+	if err := r.Register(&hregistry.Info{Addr: addr}); err != nil {
+		t.Fatalf("空 ServiceName + 兜底名应注册成功: %v", err)
+	}
+	if got := fr.Registered[0].Service; got != "fallback-svc" {
+		t.Fatalf("Service = %q, want fallback-svc", got)
+	}
+
+	r2 := NewRegistry(c)
+	if err := r2.Register(&hregistry.Info{Addr: addr}); err == nil {
+		t.Fatal("空 ServiceName 无兜底必须报错（fail-closed 保留）")
+	}
 }

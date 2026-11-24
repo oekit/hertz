@@ -6,19 +6,19 @@ require (
 	github.com/cloudwego/hertz v0.10.6
 	github.com/hertz-contrib/obs-opentelemetry/tracing v0.4.1
 	github.com/hertz-contrib/tracer v0.0.0-20230215022931-b246a2eb0173
-	github.com/oekit/bootstrap v0.7.11
-	github.com/oekit/concurrency v0.36.0
-	github.com/oekit/core v0.15.2
-	github.com/oekit/gormx v0.12.0
-	github.com/oekit/kitx v0.9.3
-	github.com/oekit/logx v0.11.0
-	github.com/oekit/metrics v0.4.0
-	github.com/oekit/middleware v0.19.0
-	github.com/oekit/nns v0.9.0
-	github.com/oekit/pkg v0.61.1
-	github.com/oekit/registry v0.6.0
+	github.com/oekit/authx v0.14.0
+	github.com/oekit/bootstrap v0.7.15
+	github.com/oekit/concurrency v0.40.0
+	github.com/oekit/core v0.18.0
+	github.com/oekit/gormx v0.15.0
+	github.com/oekit/logx v0.12.1
+	github.com/oekit/metrics v0.4.3
+	github.com/oekit/middleware v0.23.1
+	github.com/oekit/nns v0.10.2
+	github.com/oekit/pkg v0.60.0
+	github.com/oekit/registry v0.8.4
 	github.com/oekit/registry/nacos v0.2.0
-	github.com/oekit/tracing v0.4.5
+	github.com/oekit/tracing v0.4.9
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
@@ -90,7 +90,7 @@ require (
 	github.com/oekit/logx/hlog v0.1.12
 	github.com/orcaman/concurrent-map v0.0.0-20210501183033-44dafcb38ecc // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/prometheus/client_model v0.6.3 // indirect
+	github.com/prometheus/client_model v0.6.3
 	github.com/prometheus/common v0.72.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
@@ -108,11 +108,11 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.28.0 // indirect
 	golang.org/x/arch v0.14.0 // indirect
-	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/net v0.60.0 // indirect
-	golang.org/x/sync v0.24.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/crypto v0.59.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/sync v0.25.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261019180522-ce908d29299b // indirect
 	google.golang.org/grpc v1.83.2 // indirect

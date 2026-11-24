@@ -9,6 +9,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/oekit/core/chain"
 	"github.com/oekit/core/transport"
+	mw "github.com/oekit/middleware"
 )
 
 func TestWrap_TerminalReceivesRequestContext(t *testing.T) {
@@ -93,5 +94,33 @@ func TestFromHertz(t *testing.T) {
 	h(context.Background(), c)
 	if !hertzRan || !nextRan {
 		t.Fatalf("FromHertz broken: hertz=%v next=%v", hertzRan, nextRan)
+	}
+}
+
+// TestFromHertz_AbortStopsChain 钉住 #289:被适配 hertz handler 的 c.Abort()
+// 必须终止**整条 chain 链**(含 terminal)。hertz 的 Abort 只停 hertz 自己的
+// ctx.index 链,与 chain 的 next 无关——不检查 IsAborted 时,ErrorResp 这类
+// 「写完 401 即 Abort」的认证短路会被绕过(terminal 照跑并覆写响应)。
+func TestFromHertz_AbortStopsChain(t *testing.T) {
+	c := app.NewContext(8)
+	c.Request.Reset()
+	c.Request.SetRequestURI("http://svc.local/api/secret")
+
+	terminalRan := false
+	handler := Wrap([]chain.Middleware{
+		FromHertz(func(ctx context.Context, c *app.RequestContext) {
+			mw.ErrorResp(c, 401, "unauthorized") // 写 401 响应 + c.Abort()
+		}),
+	}, func(ctx context.Context, c *app.RequestContext) {
+		terminalRan = true
+		c.String(200, "ok")
+	})
+	handler(context.Background(), c)
+
+	if terminalRan {
+		t.Fatal("terminal must not run after adapted hertz handler aborted (#289)")
+	}
+	if code := c.Response.StatusCode(); code != 401 {
+		t.Errorf("status = %d, want 401 (denial response must not be overwritten)", code)
 	}
 }

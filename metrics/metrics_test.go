@@ -1,10 +1,12 @@
 package metrics
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -13,6 +15,8 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	dto "github.com/prometheus/client_model/go"
 
 	"github.com/oekit/metrics"
 )
@@ -194,4 +198,158 @@ func TestMetricsHandler_OpenMetricsNegotiation(t *testing.T) {
 	if ct := string(resp.Header.Peek("Content-Type")); !strings.Contains(ct, "text/plain") {
 		t.Errorf("plain Accept: Content-Type = %q, want text/plain", ct)
 	}
+}
+
+// --- #298 回归：便捷入口可接入外部 Gatherer（promauto/第三方默认注册面可见） ---
+
+// withDuplicateWarnSpy 换装 warnDuplicateMetricFamily 为计数桩并返回计数指针。
+func withDuplicateWarnSpy(t *testing.T) *int {
+	t.Helper()
+	count := 0
+	orig := warnDuplicateMetricFamily
+	warnDuplicateMetricFamily = func(string) { count++ }
+	t.Cleanup(func() { warnDuplicateMetricFamily = orig })
+	return &count
+}
+
+// promautoProbeOnce 保证 promauto 探针只注册一次（-count>1 重跑同一进程时
+// 重复注册会 panic，DefaultRegisterer 不幂等）。
+var promautoProbeOnce sync.Once
+
+// registerPromautoProbe 用 promauto 在 prometheus.DefaultRegisterer 上注册
+// 一个唯一命名的探针 counter（#298 现象复现面）。
+func registerPromautoProbe() {
+	promautoProbeOnce.Do(func() {
+		promauto.NewCounter(prometheus.CounterOpts{
+			Name: "hertz_metrics_promauto_probe_total",
+			Help: "promauto counter registered on the default registerer",
+		}).Inc()
+	})
+}
+
+// TestMetricsHandler_WithExtraGatherers_PromautoVisible 验收判据（#298）：
+// promauto.NewCounter 声明的指标经便捷入口抓 /metrics 必须出现。
+//
+// 同时覆盖同名冲突：默认 registry 与 metrics.Registry 都带 go_* / process_*
+// family，聚合时必须去重（否则 prometheus.Gatherers 的合并错误会让整页
+// 500），且每个同名 family 告警一次（不静默）。
+func TestMetricsHandler_WithExtraGatherers_PromautoVisible(t *testing.T) {
+	registerPromautoProbe()
+	metrics.Init("metrics-extra-gatherer-test") // 确保 metrics.Registry 里有 go/process
+	warns := withDuplicateWarnSpy(t)
+
+	h := server.New(server.WithHostPorts("127.0.0.1:0"))
+	InitAndRegister("metrics-extra-gatherer-test", h, WithExtraGatherers(prometheus.DefaultGatherer))
+
+	resp := ut.PerformRequest(h.Engine, consts.MethodGet, "/metrics", nil).Result()
+	if resp.StatusCode() != consts.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want 200 (duplicate go_*/process_* families must be deduped); body:\n%s",
+			resp.StatusCode(), resp.Body())
+	}
+	body := string(resp.Body())
+	if !strings.Contains(body, "hertz_metrics_promauto_probe_total") {
+		t.Error("promauto counter from prometheus.DefaultRegisterer must be visible via WithExtraGatherers")
+	}
+	if !strings.Contains(body, "go_goroutines") {
+		t.Error("oekit metrics.Registry metrics must still be present in the merged output")
+	}
+	if *warns == 0 {
+		t.Error("duplicate metric families across gatherers must be reported via WARN, not skipped silently")
+	}
+}
+
+// TestMetricsHandler_DefaultScope 钉住文档化默认口径：不带 WithExtraGatherers
+// 时抓取面**只有** oekit metrics.Registry，promauto counter 静默缺席——
+// 这是 #298 记录的行为边界，接入外部 registry 必须显式选择。
+func TestMetricsHandler_DefaultScope(t *testing.T) {
+	registerPromautoProbe()
+	metrics.Init("metrics-default-scope-test")
+
+	h := server.New(server.WithHostPorts("127.0.0.1:0"))
+	h.GET("/metrics", MetricsHandler())
+
+	resp := ut.PerformRequest(h.Engine, consts.MethodGet, "/metrics", nil).Result()
+	if resp.StatusCode() != consts.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want 200", resp.StatusCode())
+	}
+	if body := string(resp.Body()); strings.Contains(body, "hertz_metrics_promauto_probe_total") {
+		t.Error("default entry must only expose metrics.Registry; default-registry collectors require WithExtraGatherers")
+	}
+}
+
+// TestUnionGatherer_DedupesSameNameFamilies 钉住合并语义：同名 family 以
+// 主 Gatherer 为准整族跳过额外副本，额外 Gatherer 独有的 family 保留；
+// 去重不产生错误，且每个同名 family 只告警一次（重复抓取不刷日志）。
+func TestUnionGatherer_DedupesSameNameFamilies(t *testing.T) {
+	regA := prometheus.NewRegistry()
+	regB := prometheus.NewRegistry()
+	regA.MustRegister(prometheus.NewCounterFunc(
+		prometheus.CounterOpts{Name: "hertz_union_primary_total", Help: "primary"},
+		func() float64 { return 1 }))
+	regB.MustRegister(prometheus.NewCounterFunc(
+		prometheus.CounterOpts{Name: "hertz_union_primary_total", Help: "primary"},
+		func() float64 { return 2 }))
+	regB.MustRegister(prometheus.NewCounterFunc(
+		prometheus.CounterOpts{Name: "hertz_union_extra_total", Help: "extra"},
+		func() float64 { return 3 }))
+
+	warns := withDuplicateWarnSpy(t)
+	g := &unionGatherer{primary: regA, extras: []prometheus.Gatherer{regB}}
+
+	for attempt := range 2 {
+		mfs, err := g.Gather()
+		if err != nil {
+			t.Fatalf("Gather (attempt %d): %v", attempt, err)
+		}
+		counts := make(map[string]int, len(mfs))
+		for _, mf := range mfs {
+			counts[mf.GetName()]++
+		}
+		if counts["hertz_union_primary_total"] != 1 {
+			t.Errorf("attempt %d: primary family count = %d, want 1 (extra duplicate dropped)",
+				attempt, counts["hertz_union_primary_total"])
+		}
+		if counts["hertz_union_extra_total"] != 1 {
+			t.Errorf("attempt %d: extra-only family must be preserved, count = %d",
+				attempt, counts["hertz_union_extra_total"])
+		}
+	}
+	if *warns != 1 {
+		t.Errorf("warn count = %d, want 1 (once per duplicate family name across scrapes)", *warns)
+	}
+}
+
+// failingGatherer 用于钉住额外 Gatherer 的抓取错误不被吞掉。
+type failingGatherer struct{ err error }
+
+func (g failingGatherer) Gather() ([]*dto.MetricFamily, error) { return nil, g.err }
+
+// TestUnionGatherer_PropagatesExtraErrors 额外 Gatherer 的错误必须进入返回
+// 的 MultiError（由 promhttp 以 500 + 错误日志呈现），不能被去重逻辑吞掉。
+func TestUnionGatherer_PropagatesExtraErrors(t *testing.T) {
+	boom := errors.New("boom")
+	g := &unionGatherer{
+		primary: prometheus.NewRegistry(),
+		extras:  []prometheus.Gatherer{failingGatherer{err: boom}},
+	}
+	_, err := g.Gather()
+	if !errors.Is(err, boom) {
+		t.Fatalf("Gather error = %v, want wrapping %v", err, boom)
+	}
+}
+
+// TestWithExtraGatherers_NilPanics nil Gatherer 属构造期配置错误，构造即
+// panic（fail-fast，与 MetricsHandlerFor(nil) 同口径）。
+func TestWithExtraGatherers_NilPanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("WithExtraGatherers(nil) must panic at construction time")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, "non-nil gatherer") {
+			t.Errorf("panic value = %v, want message mentioning non-nil gatherer", r)
+		}
+	}()
+	_ = MetricsHandler(WithExtraGatherers(nil))
 }
