@@ -259,7 +259,7 @@ docs(chainmw): Wrap godoc 补警示——链内不得放 core/chain.Timeout（�
 - **fix(hertzotel)**：`NewServerMiddleware` 丢弃 `NewServerTracer` 返回的 server option ⇒ span 不生成；
   现在**显式诊断**（每进程一次）并订正包注释（「只 `h.Use`」不产 span，成对入口是 `NewServerTracing`）
 
-- **fix(governance)**：策略键用 `string(c.Path())`（**原始路径**）⇒ 带路径参数的路由（如 `/order/123`）永远命中不了 path 级策略、只落到全局键 ⇒ 改用**路由模板**（静态路由不变；按具体实例路径配的策略需改到模板键）
+- **fix(governance)**（BREAKING）：策略键用 `string(c.Path())`（**原始路径**）⇒ 带路径参数的路由（如 `/order/123`）永远命中不了 path 级策略、只落到全局键 ⇒ 改用**路由模板**（静态路由不变；按具体实例路径配的策略需改到模板键）
 
 - **feat(hertztracer)**：导出裸 `Option struct{}` 且 `NewServerMiddleware(_ ...Option)` **忽略全部参数**（违反 AGENTS.md「禁止裸 Option」，且是无扩展点空壳）⇒ 改为真 Option（`WithTracer` / `WithOperationName`）并新增 `NewServerTracing`；
   engine 未装 tracer 时中间件自建 span（此前上游 `ServerCtx` 会**中断链路** ⇒ 请求无响应）
